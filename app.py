@@ -184,7 +184,7 @@ def layout_options(opts, max_per_line=2, char_limit=68):
     return result
 
 # =============================================================================
-# DOCX HELPERS (unchanged, except fill_cell)
+# DOCX HELPERS (unchanged)
 # =============================================================================
 FONT_DOCX = "Mangal"
 
@@ -223,7 +223,7 @@ def set_paragraph_indent(para, left_inches):
 
 def set_hanging_indent(para, left_inches, first_line_inches):
     """Set hanging indent where first line is less indented than subsequent lines."""
-    if left_inches > 0 or first_line_inches > 0:
+    if left_inches > 0 or first_line_inches != 0:
         pPr = para._p.get_or_add_pPr()
         ind = OxmlElement('w:ind')
         if left_inches > 0:
@@ -278,18 +278,18 @@ def cell_para(cell, runs, line=10, after=1.5, before=0, bg_color=None, left_inde
     return p
 
 # =============================================================================
-# FILL CELL (UPDATED: answer only appears inline when checkbox is True)
+# FILL CELL (UPDATED: no answer line)
 # =============================================================================
 def fill_cell(cell, q):
     for p in list(cell.paragraphs):
         p._p.getparent().remove(p._p)
     remove_cell_margins(cell)
 
-    # Question with hanging indent: number at left, text indented
+    # Question with hanging indent
     q_text = f"{q['no']}. {q['question']}"
     cell_para(cell,
               [(q_text, True, q_font)],
-              line=line_spacing, after=para_spacing, 
+              line=line_spacing, after=para_spacing,
               left_indent=q_indent, first_line_indent=-q_indent)
 
     # Options
@@ -299,12 +299,10 @@ def fill_cell(cell, q):
             text = f"{group[0]['key']} {group[0]['text']}"
         else:
             text = "    ".join(f"{opt['key']} {opt['text']}" for opt in group)
-        
-        # If this is the last group and inline answer is enabled, add answer right-aligned
+
         if show_correct_inline and idx == len(option_groups)-1:
             p = cell.add_paragraph()
-            set_hanging_indent(p, q_indent, 0)  # Indent entire paragraph
-            # Set tab stop at right margin (approx 6 inches)
+            set_hanging_indent(p, q_indent, 0)
             tab_stops = p.paragraph_format.tab_stops
             tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
             r = p.add_run(text + "\t" + q['correct'])
@@ -315,10 +313,8 @@ def fill_cell(cell, q):
                 set_char_spacing(r, char_spacing)
             set_spacing(p, line_pts=line_spacing, after_pts=para_spacing)
         else:
-            cell_para(cell, [(text, opt_bold, opt_font)], 
+            cell_para(cell, [(text, opt_bold, opt_font)],
                       line=line_spacing, after=para_spacing, left_indent=q_indent)
-
-    # No separate answer line (removed entirely)
 
     # Explanation with bullet
     if q['explanation']:
@@ -330,7 +326,7 @@ def fill_cell(cell, q):
         cell_para(cell, [(expl_text, False, expl_font)],
                   line=line_spacing, after=para_spacing * 2, bg_color=bg, left_indent=q_indent)
 
-    # Optional separator line
+    # Separator line
     if show_separator:
         p = cell.add_paragraph()
         r = p.add_run()
@@ -347,7 +343,7 @@ def fill_cell(cell, q):
         set_spacing(p, line_pts=line_spacing, after_pts=2)
 
 # =============================================================================
-# DOCX PAGE GENERATION (unchanged)
+# DOCX PAGE GENERATION (NEW: side‑by‑side independent tables)
 # =============================================================================
 def create_page_with_questions(questions, page_num, total_pages, chapter_title):
     new_doc = Document()
@@ -389,41 +385,49 @@ def create_page_with_questions(questions, page_num, total_pages, chapter_title):
         top_run.font.size = Pt(9)
         set_spacing(top_para, line_pts=10, after_pts=3)
 
-    # Multi‑column table
-    content_width = page_width - left_margin - right_margin
-    col_width = (content_width - (0.05 * (num_columns - 1))) / num_columns
-    DIV = Inches(0.05)
-
+    # Split questions into columns (sequential split)
     n = len(questions)
     per_col = (n + num_columns - 1) // num_columns
-    cols = []
+    col_questions = []
     for i in range(num_columns):
         start = i * per_col
         end = min((i + 1) * per_col, n)
-        cols.append(questions[start:end])
-    rows = max(len(col) for col in cols)
-    tbl = new_doc.add_table(rows=rows, cols=num_columns * 2 - 1)
-    tbl.autofit = False
+        col_questions.append(questions[start:end])
+
+    # Create an outer table with num_columns cells, no borders
+    outer_tbl = new_doc.add_table(rows=1, cols=num_columns)
+    outer_tbl.autofit = False
+    # Calculate column width
+    content_width = page_width - left_margin - right_margin
+    col_width = (content_width - (0.1 * (num_columns - 1))) / num_columns
     for i in range(num_columns):
-        tbl.columns[i*2].width = Inches(col_width)
-        if i < num_columns - 1:
-            tbl.columns[i*2+1].width = DIV
-    divider_border = {"val": "single", "sz": "4", "color": "AAAAAA", "space": "0"}
-    for row_idx in range(rows):
-        row = tbl.rows[row_idx]
-        for col_idx in range(num_columns):
-            cell = row.cells[col_idx*2]
-            cell.width = Inches(col_width)
-            if row_idx < len(cols[col_idx]):
-                fill_cell(cell, cols[col_idx][row_idx])
-            set_cell_borders(cell, top=no_border(), bottom=no_border(),
-                             left=no_border() if col_idx==0 else divider_border,
-                             right=divider_border if col_idx < num_columns-1 else no_border())
-            if col_idx < num_columns - 1:
-                div_cell = row.cells[col_idx*2+1]
-                div_cell.width = DIV
-                set_cell_borders(div_cell, top=no_border(), bottom=no_border(),
+        outer_tbl.columns[i].width = Inches(col_width)
+
+    # For each column, create an inner table (or just add paragraphs)
+    for col_idx, col_qs in enumerate(col_questions):
+        cell = outer_tbl.cell(0, col_idx)
+        # Remove default paragraph and cell margins
+        for p in list(cell.paragraphs):
+            p._p.getparent().remove(p._p)
+        remove_cell_margins(cell)
+        # No borders on outer cells
+        set_cell_borders(cell, top=no_border(), bottom=no_border(),
+                         left=no_border(), right=no_border())
+
+        if col_qs:
+            # Create an inner table with rows = number of questions
+            inner_tbl = cell.add_table(rows=len(col_qs), cols=1)
+            inner_tbl.autofit = False
+            inner_tbl.columns[0].width = Inches(col_width)
+            for i, q in enumerate(col_qs):
+                row_cell = inner_tbl.rows[i].cells[0]
+                fill_cell(row_cell, q)
+                # Remove inner table cell borders
+                set_cell_borders(row_cell, top=no_border(), bottom=no_border(),
                                  left=no_border(), right=no_border())
+        else:
+            # No questions for this column – keep empty
+            pass
 
     # Bottom page number
     if page_num_pos.startswith("Bottom") and not (hide_on_first and page_num == 1):
@@ -450,9 +454,6 @@ def generate_multi_page_docx(questions, chapter_title, q_per_page=None):
             lines = 1  # question
             opt_groups = layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit)
             lines += len(opt_groups)
-            if not show_correct_inline:
-                # No answer line, so no extra line
-                pass
             if q['explanation']:
                 lines += len(q['explanation'].split('|'))
             total_lines += lines
@@ -476,7 +477,7 @@ def generate_multi_page_docx(questions, chapter_title, q_per_page=None):
     return final_doc
 
 # =============================================================================
-# HTML PREVIEW (UPDATED: no answer div)
+# HTML PREVIEW (UPDATED: CSS multi‑column)
 # =============================================================================
 def render_q_preview(q):
     option_groups = layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit)
@@ -497,9 +498,8 @@ def render_q_preview(q):
     expl_style = f"background-color: #F5F5F5; padding: 2px 4px; border-radius: 3px;" if expl_bg else ""
 
     q_text = f"<b>{q['no']}.</b> {q['question']}"
-    
     return f"""
-<div class="qblock">
+<div class="qblock" style="break-inside: avoid; margin-bottom: 8px; padding-bottom: 7px;">
   <div class="qtext" style="margin-left: {q_indent*96}px; text-indent: -{q_indent*96}px;">{q_text}</div>
   <div class="qopts" style="margin-left: {q_indent*96}px; font-size: {opt_font}pt;">{opts_html}</div>
   <div class="qexpl" style="margin-left: {q_indent*96}px; font-size: {expl_font}pt; {expl_style}">{expl}</div>
@@ -513,25 +513,17 @@ def build_preview_with_pagination(questions, q_per_page, chapter_title):
         start = (page_num - 1) * q_per_page
         end = min(start + q_per_page, len(questions))
         page_questions = questions[start:end]
-        per_col = (len(page_questions) + num_columns - 1) // num_columns
-        cols = []
-        for i in range(num_columns):
-            start_col = i * per_col
-            end_col = min((i+1) * per_col, len(page_questions))
-            cols.append(page_questions[start_col:end_col])
 
-        col_html = []
-        for col in cols:
-            col_content = "".join(render_q_preview(q) for q in col)
-            col_html.append(f"<div class='col'>{col_content}</div>")
+        # Build HTML for the page using CSS multi‑column
+        content_html = "".join(render_q_preview(q) for q in page_questions)
 
         page_html = f"""
-<div class="page">
-  <div class="page-header" style="background-color: #E6E6E6; padding: 4px; border-radius: 3px; text-align: center; font-weight: bold;">
+<div class="page" style="width: {page_width*96}px; min-height: {page_height*96}px; background: white; margin: 0 auto 20px auto; padding: {top_margin*96}px {right_margin*96}px {bottom_margin*96}px {left_margin*96}px; box-shadow: 0 4px 24px rgba(0,0,0,0.5); page-break-after: always;">
+  <div class="page-header" style="background-color: #E6E6E6; padding: 4px; border-radius: 3px; text-align: center; font-weight: bold; margin-bottom: 12px;">
     {header_template.format(book_name=book_name, chapter_title=chapter_title, page=page_num)}
   </div>
-  <div class="columns">
-    {''.join(f"<div class='column'>{col_html[i]}</div>" for i in range(num_columns))}
+  <div class="multi-column" style="column-count: {num_columns}; column-gap: 20px;">
+    {content_html}
   </div>
 </div>
 """
@@ -540,23 +532,13 @@ def build_preview_with_pagination(questions, q_per_page, chapter_title):
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ background: #666; font-family: 'Arial', sans-serif; padding: 20px; }}
-  .page {{
-    width: {page_width*96}px; min-height: {page_height*96}px; background: white; margin: 0 auto 20px auto;
-    padding: {top_margin*96}px {right_margin*96}px {bottom_margin*96}px {left_margin*96}px;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
-    page-break-after: always;
+  body {{ background: #666; font-family: 'Mangal', 'Nirmala UI', 'Noto Sans Devanagari', 'Arial', sans-serif; padding: 20px; }}
+  .qblock {{
+    margin-bottom: 8px;
+    padding-bottom: 7px;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }}
-  .columns {{
-    display: grid;
-    grid-template-columns: repeat({num_columns}, 1fr);
-    gap: 20px;
-    align-items: start;
-  }}
-  .column {{
-    padding: 0 5px;
-  }}
-  .qblock {{ margin-bottom: 8px; padding-bottom: 7px; }}
   .qtext {{ font-size: {q_font}pt; margin-bottom: 3px; line-height: {line_spacing/72}in; }}
   .qopts {{ color: #222; margin-bottom: 2px; line-height: {line_spacing/72}in; }}
   .qexpl {{ color: #444; margin-top: 2px; }}
@@ -627,7 +609,9 @@ def generate_pdf(questions, chapter_title):
     header_text = header_template.format(book_name=book_name, chapter_title=chapter_title, page=1)
     story.append(Paragraph(header_text, style_h))
 
-    # PDF pagination
+    # PDF pagination – simple column layout: we'll use the same multi‑column approach by creating a frame,
+    # but reportlab's multi‑column is complex. For simplicity, we keep one‑column but allow questions to flow.
+    # To achieve compact layout, we rely on the fact that reportlab automatically uses the available space.
     for q in questions:
         story.append(Paragraph(f"{q['no']}. {q['question']}", style_q))
         opt_groups = layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit)
@@ -641,7 +625,6 @@ def generate_pdf(questions, chapter_title):
                 story.append(Paragraph(q['correct'], style_opt_right))
             else:
                 story.append(Paragraph(line, style_opt))
-        # No separate answer paragraph
         if q['explanation']:
             expl_text = q['explanation'].replace('|', '<br/>')
             if expl_bullet:
@@ -686,7 +669,6 @@ if uploaded_file:
             lines = 1
             opt_groups = layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit)
             lines += len(opt_groups)
-            # No answer line, so no extra line
             if q['explanation']:
                 lines += 1
             total_lines += lines
