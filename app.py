@@ -43,7 +43,7 @@ with st.sidebar:
 
     st.header("✍️ Text Styling")
     q_font = st.slider("Question font size (pt)", 6.0, 12.0, 8.0, 0.5)
-    q_indent = st.number_input("Content indent (inches)", 0.0, 0.8, 0.2, 0.05, 
+    q_indent = st.number_input("Content indent (inches)", 0.0, 0.8, 0.2, 0.05,
                                 help="Indentation for options, answer, and explanation")
     opt_font = st.slider("Options font size (pt)", 6.0, 11.0, 7.0, 0.5)
     opt_bold = st.checkbox("Bold options", False)
@@ -95,7 +95,7 @@ with st.sidebar:
         expl_font = 6.5
 
 # =============================================================================
-# PARSING
+# PARSING (unchanged)
 # =============================================================================
 def parse_questions(doc):
     full_text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
@@ -159,7 +159,7 @@ def parse_questions(doc):
     return questions
 
 # =============================================================================
-# OPTION LAYOUT
+# OPTION LAYOUT (unchanged)
 # =============================================================================
 def layout_options(opts, max_per_line=2, char_limit=68):
     result = []
@@ -184,7 +184,7 @@ def layout_options(opts, max_per_line=2, char_limit=68):
     return result
 
 # =============================================================================
-# DOCX HELPERS
+# DOCX HELPERS (unchanged, except fill_cell)
 # =============================================================================
 FONT_DOCX = "Mangal"
 
@@ -228,7 +228,7 @@ def set_hanging_indent(para, left_inches, first_line_inches):
         ind = OxmlElement('w:ind')
         if left_inches > 0:
             ind.set(qn('w:left'), str(int(left_inches * 1440)))
-        if first_line_inches > 0:
+        if first_line_inches != 0:
             ind.set(qn('w:firstLine'), str(int(first_line_inches * 1440)))
         pPr.append(ind)
 
@@ -263,7 +263,7 @@ def remove_cell_margins(cell):
 
 def cell_para(cell, runs, line=10, after=1.5, before=0, bg_color=None, left_indent=0, first_line_indent=0):
     p = cell.add_paragraph()
-    if left_indent > 0 or first_line_indent > 0:
+    if left_indent > 0 or first_line_indent != 0:
         set_hanging_indent(p, left_indent, first_line_indent)
     for text, bold, size in runs:
         r = p.add_run(text)
@@ -277,20 +277,22 @@ def cell_para(cell, runs, line=10, after=1.5, before=0, bg_color=None, left_inde
     set_spacing(p, line_pts=line, after_pts=after, before_pts=before)
     return p
 
+# =============================================================================
+# FILL CELL (UPDATED: answer only appears inline when checkbox is True)
+# =============================================================================
 def fill_cell(cell, q):
     for p in list(cell.paragraphs):
         p._p.getparent().remove(p._p)
     remove_cell_margins(cell)
 
-    # Question with hanging indent: first line (question number) starts at left margin,
-    # subsequent lines indented by q_indent
+    # Question with hanging indent: number at left, text indented
     q_text = f"{q['no']}. {q['question']}"
     cell_para(cell,
               [(q_text, True, q_font)],
               line=line_spacing, after=para_spacing, 
               left_indent=q_indent, first_line_indent=-q_indent)
 
-    # Options (all indented by q_indent)
+    # Options
     option_groups = layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit)
     for idx, group in enumerate(option_groups):
         if len(group) == 1:
@@ -300,10 +302,9 @@ def fill_cell(cell, q):
         
         # If this is the last group and inline answer is enabled, add answer right-aligned
         if show_correct_inline and idx == len(option_groups)-1:
-            # Use a separate paragraph with right-aligned tab
             p = cell.add_paragraph()
             set_hanging_indent(p, q_indent, 0)  # Indent entire paragraph
-            # Set tab stop at right margin
+            # Set tab stop at right margin (approx 6 inches)
             tab_stops = p.paragraph_format.tab_stops
             tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
             r = p.add_run(text + "\t" + q['correct'])
@@ -317,13 +318,9 @@ def fill_cell(cell, q):
             cell_para(cell, [(text, opt_bold, opt_font)], 
                       line=line_spacing, after=para_spacing, left_indent=q_indent)
 
-    # Answer line (only if not shown inline)
-    if not show_correct_inline:
-        cell_para(cell,
-                  [(f"उत्तर: {q['correct']}", ans_bold, ans_font)],
-                  line=line_spacing, after=para_spacing, before=para_spacing, left_indent=q_indent)
+    # No separate answer line (removed entirely)
 
-    # Explanation with bullet (indented by q_indent)
+    # Explanation with bullet
     if q['explanation']:
         expl_text = q['explanation'].replace('|', '\n')
         if expl_bullet:
@@ -454,7 +451,8 @@ def generate_multi_page_docx(questions, chapter_title, q_per_page=None):
             opt_groups = layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit)
             lines += len(opt_groups)
             if not show_correct_inline:
-                lines += 1  # answer
+                # No answer line, so no extra line
+                pass
             if q['explanation']:
                 lines += len(q['explanation'].split('|'))
             total_lines += lines
@@ -478,7 +476,7 @@ def generate_multi_page_docx(questions, chapter_title, q_per_page=None):
     return final_doc
 
 # =============================================================================
-# HTML PREVIEW (with proper hanging indent)
+# HTML PREVIEW (UPDATED: no answer div)
 # =============================================================================
 def render_q_preview(q):
     option_groups = layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit)
@@ -489,7 +487,6 @@ def render_q_preview(q):
         else:
             line = "&nbsp;&nbsp;&nbsp;&nbsp;".join(f"{opt['key']} {opt['text']}" for opt in group)
         if show_correct_inline and idx == len(option_groups)-1:
-            # Use CSS flexbox to place answer on the right
             opts_html += f"<div style='display: flex; justify-content: space-between;'><span>{line}</span><span>{q['correct']}</span></div>"
         else:
             opts_html += f"<div>{line}</div>"
@@ -499,14 +496,12 @@ def render_q_preview(q):
         expl = "• " + expl.replace('<br>', '<br>• ')
     expl_style = f"background-color: #F5F5F5; padding: 2px 4px; border-radius: 3px;" if expl_bg else ""
 
-    # Hanging indent: question number at left, text indented
     q_text = f"<b>{q['no']}.</b> {q['question']}"
     
     return f"""
 <div class="qblock">
   <div class="qtext" style="margin-left: {q_indent*96}px; text-indent: -{q_indent*96}px;">{q_text}</div>
   <div class="qopts" style="margin-left: {q_indent*96}px; font-size: {opt_font}pt;">{opts_html}</div>
-  <div class="qans" style="margin-left: {q_indent*96}px; font-size: {ans_font}pt;">{'<b>उत्तर: ' + q['correct'] + '</b>' if not show_correct_inline else ''}</div>
   <div class="qexpl" style="margin-left: {q_indent*96}px; font-size: {expl_font}pt; {expl_style}">{expl}</div>
   {('<hr>' if show_separator else '')}
 </div>"""
@@ -564,7 +559,6 @@ def build_preview_with_pagination(questions, q_per_page, chapter_title):
   .qblock {{ margin-bottom: 8px; padding-bottom: 7px; }}
   .qtext {{ font-size: {q_font}pt; margin-bottom: 3px; line-height: {line_spacing/72}in; }}
   .qopts {{ color: #222; margin-bottom: 2px; line-height: {line_spacing/72}in; }}
-  .qans {{ font-weight: bold; margin: 3px 0 1px; }}
   .qexpl {{ color: #444; margin-top: 2px; }}
   hr {{ margin: 5px 0; border: 0; border-top: 1px dotted #ccc; }}
 </style>
@@ -572,17 +566,8 @@ def build_preview_with_pagination(questions, q_per_page, chapter_title):
 {''.join(pages_html)}
 </body></html>"""
 
-def extract_chapter_title(doc):
-    for para in doc.paragraphs[:10]:
-        if "अध्याय" in para.text or "CHAPTER" in para.text.upper():
-            title = para.text.strip()
-            if len(title) > 80:
-                title = title[:80] + "..."
-            return title
-    return "RBD PUBLICATION — अध्याय"
-
 # =============================================================================
-# PDF GENERATION (simplified, with hanging indent)
+# PDF GENERATION (UPDATED: no answer paragraph)
 # =============================================================================
 def register_devanagari_font():
     possible_paths = [
@@ -628,9 +613,6 @@ def generate_pdf(questions, chapter_title):
     style_opt_right = ParagraphStyle('OptionsRight', parent=styles['Normal'], fontSize=opt_font, leading=line_spacing,
                                      fontName=devanagari_font, alignment=TA_RIGHT, spaceAfter=para_spacing,
                                      leftIndent=q_indent*inch)
-    style_ans = ParagraphStyle('Answer', parent=styles['Normal'], fontSize=ans_font, leading=line_spacing,
-                               fontName=devanagari_font, alignment=TA_LEFT, spaceAfter=para_spacing,
-                               spaceBefore=para_spacing, leftIndent=q_indent*inch)
     style_expl = ParagraphStyle('Explanation', parent=styles['Normal'], fontSize=expl_font, leading=line_spacing,
                                 fontName=devanagari_font, alignment=TA_LEFT,
                                 backColor=colors.HexColor('#F5F5F5') if expl_bg else None,
@@ -659,8 +641,7 @@ def generate_pdf(questions, chapter_title):
                 story.append(Paragraph(q['correct'], style_opt_right))
             else:
                 story.append(Paragraph(line, style_opt))
-        if not show_correct_inline:
-            story.append(Paragraph(f"<b>उत्तर: {q['correct']}</b>", style_ans))
+        # No separate answer paragraph
         if q['explanation']:
             expl_text = q['explanation'].replace('|', '<br/>')
             if expl_bullet:
@@ -674,6 +655,18 @@ def generate_pdf(questions, chapter_title):
     doc.build(story)
     buffer.seek(0)
     return buffer
+
+# =============================================================================
+# EXTRACT CHAPTER TITLE
+# =============================================================================
+def extract_chapter_title(doc):
+    for para in doc.paragraphs[:10]:
+        if "अध्याय" in para.text or "CHAPTER" in para.text.upper():
+            title = para.text.strip()
+            if len(title) > 80:
+                title = title[:80] + "..."
+            return title
+    return "RBD PUBLICATION — अध्याय"
 
 # =============================================================================
 # MAIN APP
@@ -693,8 +686,7 @@ if uploaded_file:
             lines = 1
             opt_groups = layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit)
             lines += len(opt_groups)
-            if not show_correct_inline:
-                lines += 1
+            # No answer line, so no extra line
             if q['explanation']:
                 lines += 1
             total_lines += lines
@@ -718,7 +710,7 @@ if uploaded_file:
         for q in questions[:5]:
             with st.expander(f"Q{q['no']} – {q['question'][:60]}…"):
                 st.write("**Options:**", q['options'])
-                st.write("**Answer:**", q['correct'])
+                st.write("**Correct Answer:**", q['correct'])
                 st.write("**Explanation:**", q['explanation'][:500])
 
     st.markdown("---")
