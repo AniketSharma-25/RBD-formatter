@@ -1195,7 +1195,20 @@ from dotenv import load_dotenv
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+# At the top of your app
+if hasattr(st, 'secrets'):
+    GMAIL_EMAIL = st.secrets.get("GMAIL_EMAIL")
+    GMAIL_APP_PASSWORD = st.secrets.get("GMAIL_APP_PASSWORD")
+    ADMIN_EMAIL = st.secrets.get("ADMIN_EMAIL")
+else:
+    # fallback for local development
+    from dotenv import load_dotenv
+    load_dotenv()
+    GMAIL_EMAIL = os.getenv("GMAIL_EMAIL")
+    GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+    ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 
+    
 load_dotenv()
 
 # =============================================================================
