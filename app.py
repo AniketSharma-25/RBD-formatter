@@ -1195,22 +1195,26 @@ from dotenv import load_dotenv
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-# At the top of your app
-if hasattr(st, 'secrets'):
+
+
+
+
+load_dotenv()   # loads .env for local development
+
+# Determine secrets (Streamlit Cloud) or fallback to environment variables
+try:
     GMAIL_EMAIL = st.secrets.get("GMAIL_EMAIL")
     GMAIL_APP_PASSWORD = st.secrets.get("GMAIL_APP_PASSWORD")
     ADMIN_EMAIL = st.secrets.get("ADMIN_EMAIL")
-else:
-    # fallback for local development
-    from dotenv import load_dotenv
-    load_dotenv()
+except (FileNotFoundError, AttributeError, KeyError, TypeError):
+    # If secrets not found, use environment variables
     GMAIL_EMAIL = os.getenv("GMAIL_EMAIL")
     GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
     ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 
-    
-load_dotenv()
-
+# Optional: if still None, set defaults or fallback to mock mode
+if not GMAIL_APP_PASSWORD:
+    print("⚠️ No Gmail app password found. OTP will be printed to terminal.")
 # =============================================================================
 # DATABASE SETUP (with can_format)
 # =============================================================================
