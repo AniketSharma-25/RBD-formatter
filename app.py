@@ -1191,33 +1191,42 @@ from PIL import Image as PILImage
 import sqlite3
 import datetime
 import random
-from dotenv import load_dotenv
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-
-
-
-load_dotenv()   # loads .env for local development
-
-# Determine secrets (Streamlit Cloud) or fallback to environment variables
+# Load environment variables (for local development)
 try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available (e.g., on Streamlit Cloud)
+
+# -----------------------------------------------------------------------------
+# SECRETS HANDLING (works both locally and on Streamlit Cloud)
+# -----------------------------------------------------------------------------
+try:
+    # On Streamlit Cloud, secrets are in st.secrets
     GMAIL_EMAIL = st.secrets.get("GMAIL_EMAIL")
     GMAIL_APP_PASSWORD = st.secrets.get("GMAIL_APP_PASSWORD")
     ADMIN_EMAIL = st.secrets.get("ADMIN_EMAIL")
 except (FileNotFoundError, AttributeError, KeyError, TypeError):
-    # If secrets not found, use environment variables
+    # Fallback to environment variables (local development)
     GMAIL_EMAIL = os.getenv("GMAIL_EMAIL")
     GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
     ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 
-# Optional: if still None, set defaults or fallback to mock mode
+# Optional: set defaults if still missing
+if not GMAIL_EMAIL:
+    GMAIL_EMAIL = "aniketsharmaji25@gmail.com"   # fallback sender
 if not GMAIL_APP_PASSWORD:
     print("⚠️ No Gmail app password found. OTP will be printed to terminal.")
-# =============================================================================
-# DATABASE SETUP (with can_format)
-# =============================================================================
+if not ADMIN_EMAIL:
+    ADMIN_EMAIL = "admin@example.com"
+
+# -----------------------------------------------------------------------------
+# DATABASE SETUP (with can_format column)
+# -----------------------------------------------------------------------------
 DB_PATH = "rbd_users.db"
 
 def init_db():
@@ -1228,7 +1237,6 @@ def init_db():
                     created_at TEXT,
                     is_admin BOOLEAN DEFAULT 0,
                     can_format BOOLEAN DEFAULT 0)''')
-    # For existing databases, add column if missing
     try:
         c.execute("ALTER TABLE users ADD COLUMN can_format BOOLEAN DEFAULT 0")
     except sqlite3.OperationalError:
@@ -1253,7 +1261,7 @@ def add_user(email, is_admin=False):
     c = conn.cursor()
     try:
         now = datetime.datetime.now().isoformat()
-        can_format = 1 if is_admin else 0   # admin gets format permission
+        can_format = 1 if is_admin else 0
         c.execute("INSERT INTO users (email, created_at, is_admin, can_format) VALUES (?, ?, ?, ?)",
                   (email, now, is_admin, can_format))
         conn.commit()
@@ -1320,14 +1328,12 @@ def update_user_permission(email, can_format):
     conn.close()
     log_activity(email, "permission_change", f"can_format set to {can_format}")
 
-# =============================================================================
-# REAL OTP SENDING VIA GMAIL SMTP
-# =============================================================================
+# -----------------------------------------------------------------------------
+# OTP SENDING VIA GMAIL SMTP (using global credentials)
+# -----------------------------------------------------------------------------
 def send_otp_email(email, code):
-    sender = os.getenv("GMAIL_EMAIL", "aniketsharmaji25@gmail.com")   # fallback
-    password = os.getenv("GMAIL_APP_PASSWORD")
-    if not password:
-        st.error("GMAIL_APP_PASSWORD not set in .env. Using mock OTP (printed in terminal).")
+    if not GMAIL_APP_PASSWORD:
+        st.error("GMAIL_APP_PASSWORD not set. Using mock OTP (printed in terminal).")
         print(f"🔐 OTP for {email}: {code}")
         return True
 
@@ -1335,7 +1341,7 @@ def send_otp_email(email, code):
     body = f"Your OTP is {code}. It expires in 10 minutes."
 
     msg = MIMEMultipart()
-    msg['From'] = sender
+    msg['From'] = GMAIL_EMAIL
     msg['To'] = email
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'plain'))
@@ -1343,9 +1349,9 @@ def send_otp_email(email, code):
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
-        server.login(sender, password)
+        server.login(GMAIL_EMAIL, GMAIL_APP_PASSWORD)
         text = msg.as_string()
-        server.sendmail(sender, email, text)
+        server.sendmail(GMAIL_EMAIL, email, text)
         server.quit()
         return True
     except Exception as e:
@@ -1355,9 +1361,9 @@ def send_otp_email(email, code):
 def generate_otp():
     return str(random.randint(100000, 999999))
 
-# =============================================================================
+# -----------------------------------------------------------------------------
 # AUTHENTICATION UI
-# =============================================================================
+# -----------------------------------------------------------------------------
 def login_page():
     st.title("🔐 RBD Publication – Sign In")
     with st.form("login_form"):
@@ -1366,8 +1372,7 @@ def login_page():
         if submitted and email:
             user = get_user(email)
             if not user:
-                admin_email = os.getenv("ADMIN_EMAIL", "admin@example.com")
-                is_admin = (email == admin_email)
+                is_admin = (email == ADMIN_EMAIL)
                 add_user(email, is_admin)
             otp = generate_otp()
             store_otp(email, otp)
@@ -1397,9 +1402,12 @@ def login_page():
     if not st.session_state.get("authenticated", False):
         st.stop()
 
-# =============================================================================
+# -----------------------------------------------------------------------------
 # ORIGINAL FORMATTING FUNCTIONS (UNCHANGED)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# ... (copy your original functions exactly as they were)
+# For brevity, I'm not repeating them here. Paste the entire original block below.
+# -----------------------------------------------------------------------------
 
 # ---------- Utility functions ----------
 def is_matching_question(text):
