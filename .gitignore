@@ -1,6 +1,15 @@
+<<<<<<< HEAD
 ﻿venv/
 --pychache--/
 *.pyc
 .DS_Store
 .env
 *.docx
+=======
+﻿venv/
+--pychache--/
+*.pyc
+.DS_Store
+.env
+*.docx
+>>>>>>> 662f401cab24fd0548fa6095aa38f70199814845
