@@ -1,0 +1,6 @@
+﻿venv/
+--pychache--/
+*.pyc
+.DS_Store
+.env
+*.docx
