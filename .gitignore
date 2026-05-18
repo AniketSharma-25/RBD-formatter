@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ﻿venv/
 --pychache--/
 *.pyc
@@ -5,3 +6,20 @@
 .env
 *.docx
 requirement.txt
+=======
+<<<<<<< HEAD
+﻿venv/
+--pychache--/
+*.pyc
+.DS_Store
+.env
+*.docx
+=======
+﻿venv/
+--pychache--/
+*.pyc
+.DS_Store
+.env
+*.docx
+>>>>>>> 662f401cab24fd0548fa6095aa38f70199814845
+>>>>>>> 8cb7c33f5004bfef5ca2db9c726536d6f540c243
