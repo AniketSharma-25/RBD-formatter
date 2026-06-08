@@ -46,7 +46,10 @@ ADMIN_EMAILS = {
 GRANTED_USERS = {
     e.strip() for e in os.getenv("GRANTED_USERS", "").split(",") if e.strip()
 }
+<<<<<<< HEAD
 
+=======
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
 def seed_trusted_accounts():
     conn = sqlite3.connect(DB_PATH)
@@ -211,6 +214,19 @@ def revoke_session(token):
     conn.commit()
     conn.close()
 
+<<<<<<< HEAD
+=======
+
+def get_user_sessions(email):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT token, created_at, expires_at FROM sessions WHERE email=? AND is_revoked=0",
+        (email,)
+    ).fetchall()
+    conn.close()
+    return rows
+
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
 def login_page():
     st.title("🔐 Login")
@@ -263,10 +279,16 @@ def clean_text(text):
     return text.strip()
 
 
+<<<<<<< HEAD
 # =============================================================================
 # TABLE EDITOR — unchanged from original
 # =============================================================================
 import re as _re
+=======
+def parse_suchi_table(text):
+    text = text.replace('\n', ' ')
+    text = re.sub(r'\s+', ' ', text).strip()
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
 def split_row_by_char(text: str, char: str) -> list:
     if not char:
@@ -276,6 +298,7 @@ def split_row_by_char(text: str, char: str) -> list:
     return [p.strip() for p in parts]
 
 
+<<<<<<< HEAD
 def auto_split_row(text: str) -> list:
     if "|" in text:
         return [p.strip() for p in text.split("|") if p.strip()]
@@ -284,10 +307,16 @@ def auto_split_row(text: str) -> list:
     if _re.search(r"\s{2,}", text):
         return [p.strip() for p in _re.split(r"\s{2,}", text)]
     return [text.strip()]
+=======
+    # Extract header (everything before first (A))
+    header_match = re.split(r'\([A-D]\)', text, maxsplit=1)
+    header = header_match[0].strip() if header_match else ""
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
 
 def merge_lines_to_table(lines: list, split_char: str) -> list:
     rows = []
+<<<<<<< HEAD
     for line in lines:
         if split_char == "__auto__":
             cols = auto_split_row(line)
@@ -299,10 +328,20 @@ def merge_lines_to_table(lines: list, split_char: str) -> list:
         while len(row) < max_cols:
             row.append("")
     return rows
+=======
+    max_len = max(len(suchi1), len(suchi2)) if (suchi1 or suchi2) else 0
+    for i in range(max_len):
+        left  = f"({suchi1[i][0]}) {suchi1[i][1]}" if i < len(suchi1) else ""
+        right = f"({suchi2[i][0]}) {suchi2[i][1]}" if i < len(suchi2) else ""
+        rows.append((left, right))
+
+    return header, rows
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
 
 def _decompose_question_to_lines(q: dict) -> list:
     lines = []
+<<<<<<< HEAD
     if q.get("question"):
         for raw_line in q["question"].split("\n"):
             raw_line = raw_line.strip()
@@ -474,6 +513,22 @@ def render_table_editor_tab(questions_ref):
                 f"✓ Q{entry['q_no']} · {entry['dest']} · "
                 f"{entry['rows']}r × {entry['cols']}c · split=`{entry['split_char']}`"
             )
+=======
+    if header:
+        lines.append(header)
+        lines.append("")
+    max_len = max(len(suchi1), len(suchi2))
+    for i in range(max_len):
+        left  = f"({suchi1[i][0]}) {suchi1[i][1]}" if i < len(suchi1) else ""
+        right = f"({suchi2[i][0]}) {suchi2[i][1]}" if i < len(suchi2) else ""
+        if left and right:
+            lines.append(f"{left}\t{right}")
+        elif left:
+            lines.append(left)
+        elif right:
+            lines.append(right)
+    return "\n".join(lines)
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
 
 # =============================================================================
@@ -512,6 +567,10 @@ if not st.session_state.get("_seeded"):
     seed_trusted_accounts()
     st.session_state["_seeded"] = True
 
+<<<<<<< HEAD
+=======
+# ── Session restore from query param ─────────────────────────────────────────
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 if not st.session_state.get("authenticated"):
     token = st.query_params.get("session")
     if token:
@@ -528,6 +587,10 @@ if not st.session_state.get("authenticated"):
 if not st.session_state.get("authenticated"):
     login_page()
 
+<<<<<<< HEAD
+=======
+# ── Admin panel ───────────────────────────────────────────────────────────────
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 if st.session_state.get("is_admin"):
     st.sidebar.title("👑 Admin Panel")
     conn = sqlite3.connect(DB_PATH)
@@ -558,6 +621,10 @@ if st.session_state.get("authenticated"):
         st.query_params.clear()
         st.rerun()
 
+<<<<<<< HEAD
+=======
+# ── Access guard ──────────────────────────────────────────────────────────────
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 if not st.session_state.get("can_format"):
     st.error("❌ You are not allowed to use formatter")
     st.stop()
@@ -581,7 +648,10 @@ with st.sidebar:
     auto_fill   = st.checkbox("Auto‑fill pages", True)
 
     st.header("🔤 Font Settings (Output DOCX)")
+<<<<<<< HEAD
     _default_font_lang_idx = 1 if st.session_state.get("_is_english_doc") else 0
+=======
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     font_language = st.selectbox(
         "Select Font Language",
         ["Hindi (Devanagari)", "English"],
@@ -677,6 +747,7 @@ with st.sidebar:
         mtf_cell_pad    = st.number_input("Cell left padding (twips)", 0, 120, 40, 10, key="mtf_pad")
 
     st.header("📝 Header & Footer")
+<<<<<<< HEAD
     chapter_heading = st.text_input("Chapter Heading", "")
     header_font  = st.slider("Header font size (pt)", 8.0, 16.0, 13.0, 0.5)
     header_bold  = st.checkbox("Header bold", True)
@@ -686,6 +757,15 @@ with st.sidebar:
 
     book_name  = "RBD PUBLICATION"
     topic_name = ""
+=======
+    header_template = st.text_input("Header template", "{book_name} | {chapter_title} | पृष्ठ {page}")
+    book_name       = st.text_input("Book name", "RBD PUBLICATION")
+    topic_name      = st.text_input("Topic / Chapter Name (shown in header center)", "")
+    header_font     = st.slider("Header font size (pt)", 8.0, 16.0, 11.0, 0.5)
+    header_bold     = st.checkbox("Header bold", True)
+    header_bg       = st.checkbox("Header grey background", True)
+    header_align    = st.selectbox("Header alignment", ["Left", "Center", "Right"], index=1)
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
     st.header("🔢 Page Numbers")
     page_num_pos = st.selectbox(
@@ -706,12 +786,12 @@ with st.sidebar:
         opt_font     = 5.0
         expl_font    = 5.0
 
-
 # =============================================================================
 # ███████████████████████████████████████████████████████████████████████████
 # NEW TAG-BASED PARSER  (replaces parse_questions + parse_english_questions)
 # ███████████████████████████████████████████████████████████████████████████
 # =============================================================================
+<<<<<<< HEAD
 
 # ---------------------------------------------------------------------------
 # STEP 1 — Extract full text from all paragraphs (preserve newlines)
@@ -1291,6 +1371,9 @@ def parse_match_following_pairs(text, separator_pattern=None):
 # Heuristic Hindi parser (fallback for untagged files)
 def parse_questions_heuristic(doc):
     """Original heuristic parser — used only when no tags are found."""
+=======
+def parse_questions(doc):
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     import io as _io
     questions = []
     current_block = []
@@ -1348,7 +1431,11 @@ def parse_questions_heuristic(doc):
                 if q:
                     q['no'] = str(len(questions) + 1)
                     questions.append(q)
+<<<<<<< HEAD
             current_block   = []
+=======
+            current_block  = []
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
             inside_question = False
             continue
 
@@ -1374,8 +1461,26 @@ def parse_questions_heuristic(doc):
     return questions
 
 
+<<<<<<< HEAD
 def _process_heuristic_block(block):
     """Original process_question_block logic."""
+=======
+def remove_metadata_pattern(text):
+    pattern = r'\(.*?\d{2}.*?\[.*?\].*?\(.*?\).*?\)'
+    return re.sub(pattern, '', text).strip()
+
+
+def is_matching_question(text):
+    if not text:
+        return False
+    return bool(
+        re.search(r'सूची', text, re.IGNORECASE) or
+        re.search(r'\(\d\)', text)
+    )
+
+
+def process_question_block(block):
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     full_text = "\n".join(txt for txt, _ in block).strip()
 
     q_no = None
@@ -1390,6 +1495,7 @@ def _process_heuristic_block(block):
     if not q_no:
         return None
 
+<<<<<<< HEAD
     ans_match = re.search(
         r'(?:सही उत्तर|उत्तर)\s*[:\-]\s*\(([a-dA-D])\)',
         full_text
@@ -1398,6 +1504,16 @@ def _process_heuristic_block(block):
 
     explanation  = ""
     expl_match = re.search(
+=======
+    ans_match = re.search(r'(?:सही उत्तर|उत्तर)\s*[:\-]\s*\(([a-dA-D])\)', full_text)
+    if not ans_match:
+        # Only match if the trailing "(x)" is not immediately preceded by option text
+        ans_match = re.search(r'(?<=[।\.!\?\s])\(([a-dA-D])\)\s*$', full_text)
+    correct = f"({ans_match.group(1).lower()})" if ans_match else ""
+
+    explanation = ""
+    expl_match  = re.search(
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
         r'व्याख्या\s*:\s*(.*?)(?=\n\s*(\d+\.|प्रश्न\s+\d+)|$)',
         full_text, re.DOTALL
     )
@@ -1411,20 +1527,39 @@ def _process_heuristic_block(block):
         content = content[:expl_match.start()]
     content = content.strip()
 
+<<<<<<< HEAD
     suchi_rows   = []
     suchi_h1     = "सूची-I"
     suchi_h2     = "सूची-II"
+=======
+    suchi_block  = ""
+    suchi_header = ""
+    suchi_rows   = []
+    # Match standalone कूट only — NOT चित्रकूट, महाकूट, etc.
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     suchi_match = re.search(r'(सूची.*?)(?=(?<!\S)कूट(?!\S)|$)', content, re.DOTALL)
     if suchi_match:
         suchi_block = suchi_match.group(1)
         _, suchi_rows, suchi_h1, suchi_h2 = parse_suchi_table(suchi_block)
         content = content.replace(suchi_match.group(1), "")
 
+<<<<<<< HEAD
     match_following_rows = []
 
     koot_block = extract_koot_block(content)
     if koot_block:
         content = content.replace(koot_block, "").strip()
+=======
+    # FIX: standalone कूट only — must be at line-start or after whitespace,
+    # so चित्रकूट / महाकूट are never matched.
+    koot_block  = ""
+    koot_match  = re.search(
+        r'(?:^|\n)(कूट\s*:?.*?)(?=सही उत्तर|उत्तर\s*:|व्याख्या\s*:|$)',
+        full_text, re.DOTALL | re.MULTILINE
+    )
+    if koot_match:
+        koot_block = koot_match.group(1).strip()
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
     first_opt = re.search(r'\([a-dA-D]\)', content)
     if first_opt:
@@ -1438,6 +1573,15 @@ def _process_heuristic_block(block):
 
     options = []
     if opts_raw:
+<<<<<<< HEAD
+=======
+        opts_raw = re.split(
+            r'(?=\n\s*\d+\.)|'
+            r'(?=\n\s*प्रश्न\s+\d+)|'
+            r'(?:^|\n)(?:कूट|व्याख्या|उत्तर)',
+            opts_raw
+        )[0]
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
         matches = re.findall(
             r'\(([a-dA-D])\)\s*(.*?)(?=\([a-dA-D]\)|$)',
             opts_raw, re.DOTALL
@@ -1448,6 +1592,7 @@ def _process_heuristic_block(block):
                 options.append({"key": f"({key.lower()})", "text": text.strip()})
 
     options = options[:4]
+<<<<<<< HEAD
     koot_grid = parse_koot_grid(koot_block) if koot_block else {'is_grid': False}
 
     return {
@@ -1464,6 +1609,44 @@ def _process_heuristic_block(block):
         "explanation_images":   [],
         "metadata":             "",
         "_layout":              None,
+=======
+
+    # Build final_question — suchi_rows stored separately for DOCX table rendering
+    final_question = question_text
+    if suchi_header:
+        final_question += "\n\n[SUCHI_HEADER]" + suchi_header
+    if koot_block:
+        final_question += "\n\n" + koot_block
+
+    # Collect explanation images (paragraphs after the answer/explanation marker)
+    explanation_images = []
+    answer_idx = -1
+    for idx, (txt, _) in enumerate(block):
+        if re.search(r'(उत्तर|व्याख्या)', txt):
+            answer_idx = idx
+            break
+    src = block[answer_idx + 1:] if answer_idx != -1 else []
+    for _, imgs in src:
+        explanation_images.extend(imgs)
+
+    meta_match = re.search(
+        r'\(([^)]*\d{2,4}[^)]*(?:shift|Shift|पाली|[\[\(][^)\]]*[\]\)])[^)]*)\)',
+        full_text
+    )
+    if not meta_match:
+        meta_match = re.search(r'\(([^)]*\d{4}[^)]*)\)', full_text)
+    metadata_str = meta_match.group(0).strip() if meta_match else ""
+
+    return {
+        "no":                 q_no,
+        "question":           final_question,
+        "suchi_rows":         suchi_rows,
+        "options":            options,
+        "correct":            correct,
+        "explanation":        explanation,
+        "explanation_images": explanation_images,
+        "metadata":           metadata_str,
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     }
 
 
@@ -1777,8 +1960,13 @@ def apply_font_to_run(run):
 
 def add_run(para, text, bold=False, size_pt=8, italic=False):
     r = para.add_run(text)
+<<<<<<< HEAD
     r.bold      = bold
     r.italic    = italic
+=======
+    r.bold    = bold
+    r.italic  = italic
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     r.font.size = Pt(size_pt)
     apply_font_to_run(r)
     if char_spacing > 0:
@@ -1787,7 +1975,11 @@ def add_run(para, text, bold=False, size_pt=8, italic=False):
 
 
 # =============================================================================
+<<<<<<< HEAD
 # NEW: KATHAN RENDERER — renders kathan_lines as indented block in DOCX
+=======
+# सूची TABLE — rendered as a proper DOCX 2-column table
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 # =============================================================================
 def add_kathan_block(container, kathan_lines):
     """
@@ -1816,6 +2008,10 @@ def add_suchi_table(container, suchi_rows, col_width_in, col_headers=("सूच
     total_dxa = half_dxa * 2
 
     tbl = OxmlElement('w:tbl')
+<<<<<<< HEAD
+=======
+
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     tblPr = OxmlElement('w:tblPr')
     tblW  = OxmlElement('w:tblW')
     tblW.set(qn('w:w'),    str(total_dxa))
@@ -1847,10 +2043,17 @@ def add_suchi_table(container, suchi_rows, col_width_in, col_headers=("सूच
         tblGrid.append(gc)
     tbl.append(tblGrid)
 
+<<<<<<< HEAD
     def make_tc(text_content, width_dxa, bold=False):
         tc   = OxmlElement('w:tc')
         tcPr = OxmlElement('w:tcPr')
         tcW  = OxmlElement('w:tcW')
+=======
+    def make_tc(text_content, width_dxa):
+        tc    = OxmlElement('w:tc')
+        tcPr  = OxmlElement('w:tcPr')
+        tcW   = OxmlElement('w:tcW')
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
         tcW.set(qn('w:w'),    str(width_dxa))
         tcW.set(qn('w:type'), 'dxa')
         tcPr.append(tcW)
@@ -1863,11 +2066,19 @@ def add_suchi_table(container, suchi_rows, col_width_in, col_headers=("सूच
         tcMar = OxmlElement('w:tcMar')
         for edge, val in [('top', '0'), ('left', '40'), ('bottom', '0'), ('right', '80')]:
             m = OxmlElement(f'w:{edge}')
+<<<<<<< HEAD
             m.set(qn('w:w'),    val)
+=======
+            m.set(qn('w:w'),    '40')
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
             m.set(qn('w:type'), 'dxa')
             tcMar.append(m)
         tcPr.append(tcMar)
         tc.append(tcPr)
+<<<<<<< HEAD
+=======
+
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
         p   = OxmlElement('w:p')
         pPr = OxmlElement('w:pPr')
         sp  = OxmlElement('w:spacing')
@@ -1977,6 +2188,7 @@ def add_suchi_table(container, suchi_rows, col_width_in, col_headers=("सूच
         tr.append(make_tc(right_text, half_dxa))
         tbl.append(tr)
 
+<<<<<<< HEAD
     last_para = container.paragraphs[-1]._element if container.paragraphs else None
     if last_para is not None:
         last_para.addnext(tbl)
@@ -2452,23 +2664,51 @@ def add_options_table(container, option_groups, col_width_in, correct_ans, ancho
 
 # -=-------  Fill cell  
 
+=======
+    container._element.body.append(tbl)
+
+
+# =============================================================================
+# FILL CELL
+# =============================================================================
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 def fill_cell(container, q, include_metadata=False):
     content_width = page_width - left_margin - right_margin
     col_gap   = 0.08 if num_columns == 3 else 0.12
     col_width = (content_width - col_gap * (num_columns - 1)) / num_columns
 
+<<<<<<< HEAD
     # ── Question paragraph ──────────────────────────────────────────────────
+=======
+    # ── Question paragraph ───────────────────────────────────────────────────
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     p_q = container.add_paragraph()
     p_q.paragraph_format.left_indent       = Inches(level2_indent)
     p_q.paragraph_format.first_line_indent = Inches(level1_indent - level2_indent)
 
     tab_stops = p_q.paragraph_format.tab_stops
+<<<<<<< HEAD
     tab_stops.add_tab_stop(Inches(level2_indent),   WD_TAB_ALIGNMENT.LEFT)
     tab_stops.add_tab_stop(Inches(col_width - 0.2), WD_TAB_ALIGNMENT.LEFT)
 
     display_question = q['question']
     add_run(p_q, f"{q['no']}. ", bold=True,   size_pt=q_font)
     add_run(p_q, display_question, bold=q_bold, size_pt=q_font)
+=======
+    tab_stops.add_tab_stop(Inches(level2_indent),       WD_TAB_ALIGNMENT.LEFT)
+    tab_stops.add_tab_stop(Inches(col_width - 0.2),     WD_TAB_ALIGNMENT.LEFT)
+
+    # Strip [SUCHI_HEADER] sentinel and extract visible question text
+    display_question    = q['question']
+    suchi_header_display = ""
+    if "[SUCHI_HEADER]" in display_question:
+        parts                = display_question.split("[SUCHI_HEADER]", 1)
+        display_question     = parts[0].strip()
+        suchi_header_display = parts[1].strip() if len(parts) > 1 else ""
+
+    add_run(p_q, f"{q['no']}. ", bold=True,  size_pt=q_font)
+    add_run(p_q, display_question, bold=True, size_pt=q_font)
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     set_spacing(p_q, line_pts=line_spacing, after_pts=para_spacing)
 
     if include_metadata and q.get('metadata'):
@@ -2481,6 +2721,7 @@ def fill_cell(container, q, include_metadata=False):
         apply_font_to_run(r_meta)
         set_spacing(p_meta, line_pts=line_spacing, after_pts=0)
 
+<<<<<<< HEAD
     # ── Kathan / Statement lines ────────────────────────────────────────────
     if q.get('kathan_lines'):
         add_kathan_block(container, q['kathan_lines'])
@@ -2513,6 +2754,29 @@ def fill_cell(container, q, include_metadata=False):
         add_options_table(container, option_groups, col_width, q['correct'],
                           anchor=anchor_el)
         anchor_el.getparent().remove(anchor_el)
+=======
+    # ── सूची header label (e.g. "सूची-I  सूची-II") ──────────────────────────
+    if suchi_header_display:
+        p_sh = container.add_paragraph()
+        p_sh.paragraph_format.left_indent = Inches(level2_indent)
+        add_run(p_sh, suchi_header_display, bold=True, size_pt=q_font)
+        set_spacing(p_sh, line_pts=line_spacing, after_pts=0)
+
+    # ── सूची table — left col || right col ────────────────────────
+    if q.get('suchi_rows'):
+        add_suchi_table(container, q['suchi_rows'], col_width)
+
+    # ── Options ──────────────────────────────────────────────────────────────
+    option_groups = layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit)
+    right_tab_pos = col_width - 0.2
+
+    for idx, group in enumerate(option_groups):
+        text  = ("    ".join(f"{o['key']} {o['text']}" for o in group)
+                 if len(group) > 1 else f"{group[0]['key']} {group[0]['text']}")
+        p_opt = container.add_paragraph()
+        p_opt.paragraph_format.left_indent = Inches(level2_indent)
+        add_run(p_opt, text, bold=opt_bold, size_pt=opt_font)
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
     # ── Explanation ──────────────────────────────────────────────────────────
     if q['explanation']:
@@ -2521,6 +2785,7 @@ def fill_cell(container, q, include_metadata=False):
         p_expl.paragraph_format.first_line_indent = Inches(level1_indent - level2_indent)
         if expl_bg:
             set_paragraph_background(p_expl, "E6E6E6")
+<<<<<<< HEAD
         _label  = expl_prefix if expl_prefix.strip() else "व्याख्या"
         _prefix = f"➤ {_label}: " if expl_bullet else f"{_label}: "
         add_run(p_expl, _prefix,          bold=True, size_pt=expl_font)
@@ -2530,6 +2795,12 @@ def fill_cell(container, q, include_metadata=False):
         ctxSp = OxmlElement('w:contextualSpacing')
         ctxSp.set(qn('w:val'), '1')
         pPr_e.append(ctxSp)
+=======
+        prefix = "➤ व्याख्या: " if expl_bullet else "व्याख्या: "
+        add_run(p_expl, prefix,          bold=True, size_pt=expl_font)
+        add_run(p_expl, q['explanation'],            size_pt=expl_font)
+        set_spacing(p_expl, line_pts=line_spacing, after_pts=para_spacing * 2)
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
     # ── Explanation images ────────────────────────────────────────────────────
     for idx, (img_bytes, width_in, height_in) in enumerate(q.get('explanation_images', [])):
@@ -2561,7 +2832,10 @@ def fill_cell(container, q, include_metadata=False):
 
 def estimate_q_lines(q):
     lines  = 1
+<<<<<<< HEAD
     lines += len(q.get('kathan_lines', []))
+=======
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     lines += len(layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit))
     if q['explanation']:
         lines += 1
@@ -2573,6 +2847,7 @@ def estimate_q_lines(q):
 # =============================================================================
 # TWO-PASS GLOBAL LAYOUT PRECOMPUTATION  (unchanged)
 # =============================================================================
+<<<<<<< HEAD
 def precompute_layouts(questions):
     for q in questions:
         q['_layout'] = layout_options(
@@ -2612,6 +2887,26 @@ def precompute_layouts(questions):
 # =============================================================================
 # PAGE GENERATION  (unchanged)
 # =============================================================================
+=======
+def _add_page_number_field(para):
+    for ftype, itext in [('begin', None), ('instr', ' PAGE '), ('end', None)]:
+        run = para.add_run()
+        if ftype == 'instr':
+            instr = OxmlElement('w:instrText')
+            instr.set(qn('xml:space'), 'preserve')
+            instr.text = itext
+            run._r.append(instr)
+        else:
+            fc = OxmlElement('w:fldChar')
+            fc.set(qn('w:fldCharType'), ftype)
+            run._r.append(fc)
+        run.bold      = header_bold
+        run.font.size = Pt(header_font)
+        apply_font_to_run(run)
+    return run
+
+
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 def generate_multi_page_docx(questions, chapter_title):
     doc = Document()
 
@@ -2634,6 +2929,7 @@ def generate_multi_page_docx(questions, chapter_title):
     cols.set(qn('w:num'),   str(num_columns))
     cols.set(qn('w:space'), "300")
 
+<<<<<<< HEAD
     BG            = "E6E6E6"
     LOGO_H_INCHES = 0.22
     LOGO_W_INCHES = LOGO_H_INCHES * (922 / 376)
@@ -2642,10 +2938,14 @@ def generate_multi_page_docx(questions, chapter_title):
     HEADER_HEIGHT_IN = LOGO_H_INCHES + (header_top_padding / 1440.0)
     GAP_5MM_IN       = 0.197
     sec.header_distance = Inches(max(0.05, top_margin - HEADER_HEIGHT_IN - GAP_5MM_IN))
+=======
+    sec.header_distance = Inches(0.15)
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
     titlePg = OxmlElement('w:titlePg')
     sectPr.append(titlePg)
 
+<<<<<<< HEAD
     page_w_dxa = int(page_width  * 1440)
     lm_dxa     = int(left_margin * 1440)
     rm_dxa     = int(right_margin * 1440)
@@ -2662,6 +2962,35 @@ def generate_multi_page_docx(questions, chapter_title):
         tc   = OxmlElement('w:tc')
         tcPr = OxmlElement('w:tcPr')
         tcW  = OxmlElement('w:tcW')
+=======
+    BG             = "E6E6E6"
+    LOGO_H_INCHES  = 0.32
+    LOGO_W_INCHES  = LOGO_H_INCHES * (922 / 376)
+
+    page_w_dxa  = int(page_width  * 1440)
+    lm_dxa      = int(left_margin * 1440)
+    rm_dxa      = int(right_margin * 1440)
+    total_dxa   = page_w_dxa - lm_dxa - rm_dxa
+
+    PAGE_COL_DXA  = int(0.45 * 1440)
+    LOGO_COL_DXA  = int(LOGO_W_INCHES * 1440)
+    TOPIC_COL_DXA = int(1.5  * 1440)
+    MID_COL_DXA   = total_dxa - PAGE_COL_DXA - TOPIC_COL_DXA - LOGO_COL_DXA
+
+    clean_chapter = re.sub(r'\*+', '', chapter_title).strip()
+    topic_text    = topic_name.strip() if topic_name.strip() else clean_chapter
+
+    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
+    from docx.table import _Cell
+
+    LOGO_PATH = "logo.png"
+
+    def make_header_cell(width_dxa):
+        """Bare XML table cell with grey bg, no borders, vertically centered."""
+        tc    = OxmlElement('w:tc')
+        tcPr  = OxmlElement('w:tcPr')
+        tcW   = OxmlElement('w:tcW')
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
         tcW.set(qn('w:w'),    str(width_dxa))
         tcW.set(qn('w:type'), 'dxa')
         tcPr.append(tcW)
@@ -2695,6 +3024,7 @@ def generate_multi_page_docx(questions, chapter_title):
         return tc
 
     def make_text_para(text, align='center', bold=True, font_pt=None):
+        """Return a bare <w:p> XML element with styled text."""
         fpt = font_pt or header_font
         p   = OxmlElement('w:p')
         pPr = OxmlElement('w:pPr')
@@ -2727,6 +3057,7 @@ def generate_multi_page_docx(questions, chapter_title):
         return p
 
     def make_page_num_para(align='left', font_pt=None):
+        """Return a <w:p> with an auto PAGE field."""
         fpt = font_pt or header_font
         p   = OxmlElement('w:p')
         pPr = OxmlElement('w:pPr')
@@ -2758,6 +3089,7 @@ def generate_multi_page_docx(questions, chapter_title):
             p.append(r)
         return p
 
+<<<<<<< HEAD
     def make_logo_tc(logo_path, logo_w_in, logo_h_in, col_dxa, header_part):
         tc   = make_header_cell(col_dxa)
         p_el = OxmlElement('w:p')
@@ -2846,6 +3178,15 @@ def generate_multi_page_docx(questions, chapter_title):
         return tc
 
     def build_header_row(col_widths, cell_elements):
+=======
+    def build_header_table(col_widths, cell_contents):
+        """
+        Build a borderless grey header table.
+        col_widths: list of DXA widths
+        cell_contents: list of <w:p> XML elements (one per cell)
+        Returns <w:tbl> element.
+        """
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
         tbl   = OxmlElement('w:tbl')
         tblPr = OxmlElement('w:tblPr')
         tblW  = OxmlElement('w:tblW')
@@ -2873,11 +3214,22 @@ def generate_multi_page_docx(questions, chapter_title):
         trH.set(qn('w:hRule'), 'atLeast')
         trPr.append(trH)
         tr.append(trPr)
+<<<<<<< HEAD
         for tc_el in cell_elements:
             tr.append(tc_el)
         tbl.append(tr)
         return tbl
 
+=======
+        for dxa, para_el in zip(col_widths, cell_contents):
+            tc = make_header_cell(dxa)
+            tc.append(para_el)
+            tr.append(tc)
+        tbl.append(tr)
+        return tbl
+
+    # ── Page 1 header: chapter title centered, no logo, no page number ────────
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     P1_LEFT_DXA = PAGE_COL_DXA
     P1_MID_DXA  = total_dxa - PAGE_COL_DXA - LOGO_COL_DXA
 
@@ -2885,6 +3237,7 @@ def generate_multi_page_docx(questions, chapter_title):
     for p in list(first_header.paragraphs):
         p._element.getparent().remove(p._element)
 
+<<<<<<< HEAD
     tbl_first = build_header_row(
         [P1_LEFT_DXA, P1_MID_DXA, LOGO_COL_DXA],
         [
@@ -2895,10 +3248,33 @@ def generate_multi_page_docx(questions, chapter_title):
     )
     first_header._element.insert(0, tbl_first)
 
+=======
+    tbl_first = build_header_table(
+        [P1_LEFT_DXA, P1_MID_DXA, LOGO_COL_DXA],
+        [
+            make_text_para("", align='left'),
+            make_text_para(clean_chapter, align='center', font_pt=header_font + 1),
+            OxmlElement('w:p'),
+        ]
+    )
+    # Add logo to cell 3 of first-page table via _Cell
+    tc3_first = tbl_first.findall('.//' + qn('w:tc'))[2]
+    cell3_first = _Cell(tc3_first, first_header)
+    p3f = cell3_first.add_paragraph()
+    p3f.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    if os.path.exists(LOGO_PATH):
+        p3f.add_run().add_picture(LOGO_PATH, width=Inches(LOGO_W_INCHES), height=Inches(LOGO_H_INCHES))
+    else:
+        p3f.add_run("RBD")
+    first_header._element.insert(0, tbl_first)
+
+    # ── Pages 2+ header: [Page No.] | [Book Name] | [Topic] | [Logo] ──────────
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     header = sec.header
     for p in list(header.paragraphs):
         p._element.getparent().remove(p._element)
 
+<<<<<<< HEAD
     tbl_main = build_header_row(
         [PAGE_COL_DXA, MID_COL_DXA, LOGO_COL_DXA],
         [
@@ -2907,6 +3283,26 @@ def generate_multi_page_docx(questions, chapter_title):
             make_logo_tc(LOGO_PATH, LOGO_W_INCHES, LOGO_H_INCHES, LOGO_COL_DXA, sec.header.part),
         ]
     )
+=======
+    tbl_main = build_header_table(
+        [PAGE_COL_DXA, MID_COL_DXA, TOPIC_COL_DXA, LOGO_COL_DXA],
+        [
+            make_page_num_para(align='left'),
+            make_text_para(book_name,   align='center'),
+            make_text_para(topic_text,  align='right'),
+            OxmlElement('w:p'),
+        ]
+    )
+    # Add logo to cell 4 of main table
+    tc4_main = tbl_main.findall('.//' + qn('w:tc'))[3]
+    cell4_main = _Cell(tc4_main, header)
+    p3m = cell4_main.add_paragraph()
+    p3m.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    if os.path.exists(LOGO_PATH):
+        p3m.add_run().add_picture(LOGO_PATH, width=Inches(LOGO_W_INCHES), height=Inches(LOGO_H_INCHES))
+    else:
+        p3m.add_run("RBD")
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
     header._element.insert(0, tbl_main)
 
     for q in questions:
@@ -2963,6 +3359,7 @@ def render_q_preview(q):
             for _ in range(n_cols - len(group)):
                 cells_html += "<div></div>"
 
+<<<<<<< HEAD
             if show_correct_inline and is_last:
                 opts_html += (
                     f"<div style='display:flex;align-items:center;margin-left:{l2px}px;'>"
@@ -2979,6 +3376,15 @@ def render_q_preview(q):
                     f"margin-left:{l2px}px;font-size:{opt_font}pt;column-gap:6px;"
                     f"line-height:{line_spacing}pt;'>{cells_html}</div>"
                 )
+=======
+    suchi_html           = ""
+    display_question     = q['question']
+    suchi_header_display = ""
+    if "[SUCHI_HEADER]" in display_question:
+        parts                = display_question.split("[SUCHI_HEADER]", 1)
+        display_question     = parts[0].strip()
+        suchi_header_display = parts[1].strip()
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
     # ── Kathan lines HTML ──────────────────────────────────────────────────
     kathan_html = ""
@@ -3081,7 +3487,11 @@ def render_q_preview(q):
         bg_style = "background-color:#F0F0F0;padding:2px 4px;border-radius:3px;" if expl_bg else ""
         expl_html += (
             f"<div style='margin-left:{l2px}px;{bg_style}font-size:{expl_font}pt;'>"
+<<<<<<< HEAD
             f"<span style='font-weight:bold;'>{_prefix}</span>"
+=======
+            f"<span style='font-weight:bold;'>{prefix}</span>"
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
         )
         if q['explanation']:
             expl_html += q['explanation'].replace('|', '<br>')
@@ -3186,6 +3596,7 @@ def generate_pdf(questions, chapter_title):
     l2 = level2_indent * inch
     kl = (level2_indent + kathan_indent_extra) * inch
 
+<<<<<<< HEAD
     sQ     = ParagraphStyle('Q',  parent=styles['Normal'], fontSize=q_font,      leading=line_spacing,
                              fontName=font, spaceAfter=para_spacing, leftIndent=l2, firstLineIndent=l1-l2)
     sMeta  = ParagraphStyle('M',  parent=styles['Normal'], fontSize=6,            leading=line_spacing,
@@ -3205,15 +3616,43 @@ def generate_pdf(questions, chapter_title):
     sKathan = ParagraphStyle('K', parent=styles['Normal'], fontSize=kathan_font,  leading=line_spacing,
                               fontName=font, leftIndent=kl,
                               backColor=colors.HexColor('#F5F5F5') if kathan_bg else None)
+=======
+    sQ    = ParagraphStyle('Q',  parent=styles['Normal'], fontSize=q_font,    leading=line_spacing,
+                            fontName=font, spaceAfter=para_spacing, leftIndent=l2, firstLineIndent=l1-l2)
+    sMeta = ParagraphStyle('M',  parent=styles['Normal'], fontSize=6,          leading=line_spacing,
+                            fontName=font, alignment=TA_RIGHT, spaceAfter=para_spacing, leftIndent=l2)
+    sOpt  = ParagraphStyle('O',  parent=styles['Normal'], fontSize=opt_font,   leading=line_spacing,
+                            fontName=font, spaceAfter=para_spacing, leftIndent=l2)
+    sAns  = ParagraphStyle('A',  parent=styles['Normal'], fontSize=opt_font+1.5, leading=line_spacing,
+                            fontName=font, alignment=TA_RIGHT, spaceAfter=para_spacing, leftIndent=l2)
+    sExpl = ParagraphStyle('E',  parent=styles['Normal'], fontSize=expl_font,  leading=line_spacing,
+                            fontName=font, spaceAfter=para_spacing*2, leftIndent=l2, firstLineIndent=l1-l2,
+                            backColor=colors.HexColor('#F0F0F0') if expl_bg else None)
+    sH    = ParagraphStyle('H',  parent=styles['Normal'], fontSize=header_font, leading=header_font+2,
+                            fontName=font, alignment=TA_CENTER,
+                            backColor=colors.HexColor('#E6E6E6') if header_bg else None, spaceAfter=6)
+    sSuchi = ParagraphStyle('S', parent=styles['Normal'], fontSize=q_font,     leading=line_spacing,
+                             fontName=font, leftIndent=l2)
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
     story = [Paragraph(f"{book_name} — {chapter_title}", sH)]
 
     for q in questions:
+<<<<<<< HEAD
         story.append(Paragraph(f"<b>{q['no']}.</b> {q['question']}", sQ))
+=======
+        display_question     = q['question']
+        suchi_header_display = ""
+        if "[SUCHI_HEADER]" in display_question:
+            parts                = display_question.split("[SUCHI_HEADER]", 1)
+            display_question     = parts[0].strip()
+            suchi_header_display = parts[1].strip()
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
         if include_metadata and q.get('metadata'):
             story.append(Paragraph(q['metadata'], sMeta))
 
+<<<<<<< HEAD
         # Kathan lines
         for line in q.get('kathan_lines', []):
             safe = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
@@ -3221,6 +3660,11 @@ def generate_pdf(questions, chapter_title):
                 f"<b>{safe}</b>" if kathan_bold else safe, sKathan
             ))
 
+=======
+        # सूची table in PDF
+        if suchi_header_display:
+            story.append(Paragraph(f"<b>{suchi_header_display}</b>", sSuchi))
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
         if q.get('suchi_rows'):
             content_w = page_width - left_margin - right_margin
             col_gap   = 0.08 if num_columns == 3 else 0.12
@@ -3378,6 +3822,7 @@ if uploaded_file:
     with tab2:
         for q in questions[:5]:
             with st.expander(f"Q{q['no']} – {q['question'][:60]}…"):
+<<<<<<< HEAD
                 st.write("**Options:**",             q.get('options', []))
                 st.write("**Correct Answer:**",      q.get('correct', ''))
                 st.write("**Explanation:**",         (q.get('explanation') or '')[:500])
@@ -3389,14 +3834,26 @@ if uploaded_file:
                          q.get('match_following_rows', []))
     with tab3:
         render_table_editor_tab(st.session_state["te_questions"])
+=======
+                st.write("**Options:**",            q['options'])
+                st.write("**Correct Answer:**",     q['correct'])
+                st.write("**Explanation:**",        q['explanation'][:500])
+                st.write(f"**Explanation images:** {len(q.get('explanation_images', []))}")
+                st.write(f"**Suchi rows:** {len(q.get('suchi_rows', []))}",
+                         q.get('suchi_rows', []))
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
 
     st.markdown("---")
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🚀 Generate DOCX"):
             with st.spinner(f"Generating DOCX with font: {FONT_DOCX}..."):
+<<<<<<< HEAD
                 precompute_layouts(st.session_state["te_questions"])
                 final_doc   = generate_multi_page_docx(st.session_state["te_questions"], chapter_title)
+=======
+                final_doc   = generate_multi_page_docx(questions, chapter_title)
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
                 docx_buffer = BytesIO()
                 final_doc.save(docx_buffer)
                 docx_buffer.seek(0)
@@ -3422,4 +3879,8 @@ if uploaded_file:
                     "📥 Download PDF", pdf_buffer,
                     file_name="Formatted_Output.pdf", mime="application/pdf"
                 )
+<<<<<<< HEAD
                 st.success("🎉 PDF preview ready!")
+=======
+                st.success("🎉 PDF preview ready!")
+>>>>>>> fc2df40d1776a0e06eb4ddc5c7568e89ab2cd14c
