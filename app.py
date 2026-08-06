@@ -2,7 +2,7 @@
 
 import streamlit as st
 from docx import Document
-from docx.shared import Pt, Inches, RGBColor
+from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -723,9 +723,9 @@ def _doc_to_text(doc):
 # ---------------------------------------------------------------------------
 # STEP 2 — Split document text into tag blocks
 # ---------------------------------------------------------------------------
-# Supported tags: question, kathan, suchi, option, answer, expl, metadata
+# Supported tags: question, kathan, suchi, option, answer, expl
 _TAG_RE = re.compile(
-    r'<(question|kathan|suchi|option|answer|expl|metadata)>(.*?)</\1>',
+    r'<(question|kathan|suchi|option|answer|expl)>(.*?)</\1>',
     re.DOTALL | re.IGNORECASE
 )
 
@@ -762,7 +762,6 @@ def _group_blocks_into_questions(blocks):
             "option_raw":   "",
             "answer_raw":   "",
             "expl_raw":     "",
-            "metadata_raw": "",
         }
 
     for tag, content in blocks:
@@ -806,11 +805,6 @@ def _group_blocks_into_questions(blocks):
             if current is None:
                 current = _new_q()
             current["expl_raw"] += ("\n" if current["expl_raw"] else "") + content
-
-        elif tag == "metadata":
-            if current is None:
-                current = _new_q()
-            current["metadata_raw"] += ("\n" if current["metadata_raw"] else "") + content
 
     if current:
         questions.append(current)
@@ -1011,16 +1005,13 @@ def parse_kathan_lines(kathan_raw):
 # Also handles  कूट:  prefix line
 # ---------------------------------------------------------------------------
 
-_OPT_RE = re.compile(r'\(([a-eA-E])\)\s*(.*?)(?=\([a-eA-E]\)|$)', re.DOTALL)
+_OPT_RE = re.compile(r'\(([a-dA-D])\)\s*(.*?)(?=\([a-dA-D]\)|$)', re.DOTALL)
+_OPT_LINE_RE = re.compile(r'^\s*\(([a-dA-D])\)\s*(.+)$')
 
 def parse_options_tagged(option_raw):
     """
     Returns list of {key, text} dicts.
-    Handles options in any layout: one per line, two (or more) per line,
-    or all crammed onto a single line — since each option is matched up to
-    the next "(a)-(e)" marker rather than to the end of the line. This also
-    means decimal numbers (99.1), embedded parentheses (यकृत (लिवर)), etc.
-    are preserved correctly instead of being cut off at the next marker.
+    Handles options on one line OR one-per-line (with or without कूट: header).
     """
     if not option_raw:
         return []
@@ -1029,14 +1020,24 @@ def parse_options_tagged(option_raw):
     text = re.sub(r'^\s*(?:कूट|Codes?)\s*[:–-]?\s*\n?', '', option_raw, flags=re.IGNORECASE).strip()
 
     options = []
-    for m in _OPT_RE.finditer(text):
-        opt_text = re.sub(r'\s+', ' ', m.group(2)).strip()
-        if opt_text:
-            options.append({"key": f"({m.group(1).lower()})", "text": opt_text})
 
-    # Keep exactly as many options as were actually tagged (commonly 4, but
-    # support 5 when a 5th option is present) — never pad or duplicate.
-    return options[:5]
+    # Try line-by-line first (most reliable)
+    for line in text.replace('\r', '\n').split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        m = _OPT_LINE_RE.match(line)
+        if m:
+            options.append({"key": f"({m.group(1).lower()})", "text": m.group(2).strip()})
+
+    # If nothing found, try inline parsing (all options on one line)
+    if not options:
+        for m in _OPT_RE.finditer(text):
+            opt_text = re.sub(r'\s+', ' ', m.group(2)).strip()
+            if opt_text:
+                options.append({"key": f"({m.group(1).lower()})", "text": opt_text})
+
+    return options[:4]
 
 
 # ---------------------------------------------------------------------------
@@ -1047,7 +1048,7 @@ def parse_answer_tagged(answer_raw):
     """Returns correct answer string like '(b)' or empty string."""
     if not answer_raw:
         return ""
-    m = re.search(r'\(([a-eA-E])\)', answer_raw)
+    m = re.search(r'\(([a-dA-D])\)', answer_raw)
     return f"({m.group(1).lower()})" if m else ""
 
 
@@ -1058,19 +1059,6 @@ def parse_expl_tagged(expl_raw):
     # Strip व्याख्या: / Explanation: prefix
     text = re.sub(r'^\s*(?:व्याख्या|Explanation)\s*[:–-]\s*', '', expl_raw, flags=re.IGNORECASE)
     return clean_text(text)
-
-
-def parse_metadata_tagged(metadata_raw):
-    """
-    Returns a single display-ready string for <metadata>…</metadata> content.
-    Accepts one paper-tag per line (e.g. "SSC -2023", "UPSC-2024") and joins
-    them into one line separated by " | " so it renders neatly as a single
-    right-aligned caption next to the question.
-    """
-    if not metadata_raw:
-        return ""
-    lines = [l.strip(" \t,;") for l in metadata_raw.replace('\r', '\n').split('\n') if l.strip(" \t,;")]
-    return " | ".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1129,9 +1117,6 @@ def _make_question_dict(raw_q):
     # Explanation
     explanation = parse_expl_tagged(raw_q["expl_raw"])
 
-    # Metadata (PYQ source paper info, e.g. "SSC -2023 | UPSC-2024")
-    metadata = parse_metadata_tagged(raw_q.get("metadata_raw", ""))
-
     # Build final question body:
     # If there were kathan lines, keep question body separate; kathan goes in kathan_lines field.
     # The question body is shown as the main question text.
@@ -1149,7 +1134,7 @@ def _make_question_dict(raw_q):
         "correct":              correct,
         "explanation":          explanation,
         "explanation_images":   [],
-        "metadata":             metadata,
+        "metadata":             "",
         "_layout":              None,
     }
 
@@ -1405,7 +1390,7 @@ def _process_heuristic_block(block):
         return None
 
     ans_match = re.search(
-        r'(?:सही उत्तर|उत्तर)\s*[:\-]\s*\(([a-eA-E])\)',
+        r'(?:सही उत्तर|उत्तर)\s*[:\-]\s*\(([a-dA-D])\)',
         full_text
     )
     correct = f"({ans_match.group(1).lower()})" if ans_match else ""
@@ -1453,7 +1438,7 @@ def _process_heuristic_block(block):
     options = []
     if opts_raw:
         matches = re.findall(
-            r'\(([a-eA-E])\)\s*(.*?)(?=\([a-eA-E]\)|$)',
+            r'\(([a-dA-D])\)\s*(.*?)(?=\([a-dA-D]\)|$)',
             opts_raw, re.DOTALL
         )
         for key, text in matches:
@@ -1461,7 +1446,7 @@ def _process_heuristic_block(block):
             if text:
                 options.append({"key": f"({key.lower()})", "text": text.strip()})
 
-    options = options[:5]
+    options = options[:4]
     koot_grid = parse_koot_grid(koot_block) if koot_block else {'is_grid': False}
 
     return {
@@ -1485,9 +1470,8 @@ def _process_heuristic_block(block):
 _EN_Q_LABEL_RE  = re.compile(r'^\s*Question[-\s]*(\d+)\s*[.:]?\s*$', re.I)
 _EN_Q_INLINE_RE = re.compile(r'^\s*Question\s+(\d+)[.):\s]\s*(.+)$', re.I)
 _EN_Q_BARE_RE   = re.compile(r'^\s*(\d+)[.)]\s+(.+)$')
-# NEW
-_EN_OPT_RE_ENG  = re.compile(r'^\s*\(([a-eA-E])\)\s*(.+)$')
-_EN_ANS_RE      = re.compile(r'^\s*(?:Answer|Correct\s*Answer)\s*[-:]\s*\(([a-eA-E])\)', re.I)
+_EN_OPT_RE_ENG  = re.compile(r'^\s*\(([a-dA-D])\)\s*(.+)$')
+_EN_ANS_RE      = re.compile(r'^\s*(?:Answer|Correct\s*Answer)\s*[-:]\s*\(([a-dA-D])\)', re.I)
 _EN_EXPL_HDR_RE = re.compile(r'^\s*(?:Explanation|Explain)\s*[-:]?\s*(.*)', re.I)
 _EN_NOTE_RE     = re.compile(r'^\s*\(Note[:\s]', re.I)
 
@@ -1609,7 +1593,7 @@ def _make_en_q(q_no, question_text, options, correct, explanation):
         "no":                   q_no,
         "question":             question_text,
         "kathan_lines":         [],
-        "options":              options[:5],
+        "options":              options[:4],
         "correct":              correct,
         "explanation":          explanation,
         "suchi_rows":           [],
@@ -1676,14 +1660,10 @@ def layout_options(opts, max_per_line=2, char_limit=68):
 
     n = len(opts)
 
-    n = len(opts)
-
-    if n in (4, 5):
+    if n == 4:
         short_opts = all(len(o['text'].strip()) <= 18 for o in opts)
-        if short_opts and n == 4:
+        if short_opts:
             return [[opts[0], opts[1]], [opts[2], opts[3]]]
-        if short_opts and n == 5:
-            return [[opts[0], opts[1]], [opts[2], opts[3]], [opts[4]]]
 
     capped = min(n, max_per_line)
     if capped >= 2 and all(fits(o, capped) for o in opts):
@@ -2497,7 +2477,6 @@ def fill_cell(container, q, include_metadata=False):
         r_meta = p_meta.add_run(q['metadata'])
         r_meta.italic    = True
         r_meta.font.size = Pt(max(q_font - 1.0, 5.0))
-        r_meta.font.color.rgb = RGBColor(0x77, 0x77, 0x77)
         apply_font_to_run(r_meta)
         set_spacing(p_meta, line_pts=line_spacing, after_pts=0)
 
@@ -3210,9 +3189,8 @@ def generate_pdf(questions, chapter_title):
 
     sQ     = ParagraphStyle('Q',  parent=styles['Normal'], fontSize=q_font,      leading=line_spacing,
                              fontName=font, spaceAfter=para_spacing, leftIndent=l2, firstLineIndent=l1-l2)
-    sMeta  = ParagraphStyle('M',  parent=styles['Normal'], fontSize=max(q_font - 1.0, 6),
-                             leading=line_spacing, fontName=font, alignment=TA_RIGHT,
-                             spaceAfter=para_spacing, leftIndent=l2, textColor=colors.HexColor('#777777'))
+    sMeta  = ParagraphStyle('M',  parent=styles['Normal'], fontSize=6,            leading=line_spacing,
+                             fontName=font, alignment=TA_RIGHT, spaceAfter=para_spacing, leftIndent=l2)
     sOpt   = ParagraphStyle('O',  parent=styles['Normal'], fontSize=opt_font,     leading=line_spacing,
                              fontName=font, spaceAfter=para_spacing, leftIndent=l2)
     sAns   = ParagraphStyle('A',  parent=styles['Normal'], fontSize=opt_font+1.5, leading=line_spacing,
@@ -3235,7 +3213,7 @@ def generate_pdf(questions, chapter_title):
         story.append(Paragraph(f"<b>{q['no']}.</b> {q['question']}", sQ))
 
         if include_metadata and q.get('metadata'):
-            story.append(Paragraph(f"<i>{q['metadata']}</i>", sMeta))
+            story.append(Paragraph(q['metadata'], sMeta))
 
         # Kathan lines
         for line in q.get('kathan_lines', []):
