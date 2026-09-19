@@ -1,8 +1,8 @@
-# new august update # tagged approach trail   [ Tags required]
+
 
 import streamlit as st
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -16,6 +16,8 @@ import subprocess
 import shutil
 import zipfile
 import unicodedata
+import copy
+import html as _html
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -358,6 +360,46 @@ def clean_text(text):
 
 
 # =============================================================================
+# SHARED HELPERS — layout markers (heading / chapter / table / OR) + hex colours
+# =============================================================================
+# A "marker" is a standalone item in the question list that is NOT a numbered
+# question: filename separator, OR, <heading>, <chapter> and standalone <table>.
+MARKER_FLAGS = ("is_separator", "is_alternative", "is_heading", "is_chapter", "is_table")
+
+
+def is_marker(q):
+    return any(q.get(f) for f in MARKER_FLAGS)
+
+
+_HEX_RE = re.compile(r'^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$')
+
+
+def normalize_hex(value):
+    """'#c00', 'CC0000', '#cc0000' -> 'CC0000'.  Blank / invalid -> None."""
+    m = _HEX_RE.match((value or "").strip())
+    if not m:
+        return None
+    h = m.group(1).upper()
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    return h
+
+
+def hex_color_input(label, key, help_text=None):
+    """Sidebar text box for a hex colour. Returns 'RRGGBB' or None (= default colour)."""
+    raw = st.text_input(label, value="", key=key,
+                        placeholder="#RRGGBB  (blank = default)", help=help_text)
+    val = normalize_hex(raw)
+    if raw.strip() and val is None:
+        st.caption(f"⚠️ `{raw}` is not a valid hex colour — default colour used.")
+    return val
+
+
+def _esc(text):
+    return _html.escape(text or "", quote=False)
+
+
+# =============================================================================
 # TABLE EDITOR — unchanged from original
 # =============================================================================
 import re as _re
@@ -439,11 +481,23 @@ def _apply_table_to_question(questions_ref, q_idx, rows, dest_key, h1=None, h2=N
     })
 
 
+def _questions_signature(questions):
+    """Content fingerprint of the parsed list. Replaces the old id(questions) check:
+    `questions` is rebuilt on every Streamlit rerun, and id() of a freshly built list
+    can be reused by Python (stale editor copy) or differ (manual edits lost)."""
+    return hash(tuple(
+        (q.get("no"), (q.get("question") or "")[:60], q.get("text", ""),
+         len(q.get("options", [])), len(q.get("table_rows", [])),
+         len(q.get("explanation_points", [])))
+        for q in questions
+    ))
+
+
 def _init_table_editor_state(questions):
-    if "te_questions" not in st.session_state or st.session_state.get("te_source") != id(questions):
-        import copy
+    sig = _questions_signature(questions)
+    if "te_questions" not in st.session_state or st.session_state.get("te_source") != sig:
         st.session_state["te_questions"] = copy.deepcopy(questions)
-        st.session_state["te_source"]    = id(questions)
+        st.session_state["te_source"]    = sig
         st.session_state["te_log"]       = []
 
 
@@ -458,7 +512,8 @@ def render_table_editor_tab(questions_ref):
         st.info("No questions parsed yet.")
         return
 
-    real_indices = [i for i, q in enumerate(questions_ref) if not q.get('is_separator')]
+    real_indices = [i for i, q in enumerate(questions_ref)
+                    if not is_marker(q)]
     if not real_indices:
         st.info("No questions parsed yet.")
         return
@@ -828,9 +883,41 @@ with st.sidebar:
         opt_char_limit = st.slider(
             "Option line length threshold (chars)", 40, 120, _default_char, key="o_charlim"
         )
+        opts_written_one_line = st.checkbox(
+            "Options are written on ONE line in the file  →  (a) x (b) y (c) z (d) w",
+            value=False, key="o_written_one_line",
+            help="Ticked: each <option> block is split at (a) (b) (c) (d) (e), so options typed "
+                 "side by side on one line become separate options. Unticked: parsed exactly as "
+                 "before (one option per line)."
+        )
+        opts_layout_mode = st.selectbox(
+            "Options layout",
+            ["Auto (fit multiple per line)", "One option per line"],
+            index=0, key="o_layoutmode",
+            help="One option per line forces every option (a, b, c, d …) onto its own full-width "
+                 "line inside the column, regardless of length — useful for narrow 3-column layouts."
+        )
+        force_single_opt_per_line = (opts_layout_mode == "One option per line")
         show_correct_inline = st.checkbox(
             "Show correct answer on last option line (right-aligned)", True, key="o_showans"
         )
+        st.markdown("**5th option (E)**")
+        fifth_option_mode = st.radio(
+            "How should option (e) be added?",
+            ["From tags only (question must include (e) itself)",
+             "Add the same option (e) to every question"],
+            index=0, key="o_5th_mode",
+            help="'From tags only' uses whatever (e) each question's own <option> block contains — "
+                 "some questions can have 5 options, others 4. 'Add the same option to every question' "
+                 "appends one fixed 5th choice (e.g. 'All of the above') to every question that doesn't "
+                 "already have an explicit (e) of its own."
+        )
+        add_global_fifth_option = (fifth_option_mode == "Add the same option (e) to every question")
+        global_fifth_option_text = ""
+        if add_global_fifth_option:
+            global_fifth_option_text = st.text_input(
+                "Text for option (e)", value="All of the above", key="o_5th_text"
+            )
 
     with st.expander("📝 Explanation Style", expanded=False):
         expl_font   = st.slider("Font size (pt)", 5.0, 15.0, 12.0, 0.5, key="e_font")
@@ -869,11 +956,14 @@ with st.sidebar:
         }
         mtf_sep_pattern = _sep_map[mtf_sep_choice]
 
+        st.caption("These headings apply to **match-the-following** tables only "
+                   "(and only when \"Show shaded header row\" is ticked). "
+                   "For `<suchi>` tables use the **Suchi Table** section below.")
         mtf_col1, mtf_col2 = st.columns(2)
         with mtf_col1:
-            mtf_h1 = st.text_input("Left header",  value="सूची-I",  key="mtf_h1")
+            mtf_h1 = st.text_input("Match table – left header",  value="सूची-I",  key="mtf_h1")
         with mtf_col2:
-            mtf_h2 = st.text_input("Right header", value="सूची-II", key="mtf_h2")
+            mtf_h2 = st.text_input("Match table – right header", value="सूची-II", key="mtf_h2")
 
         mtf_left_pct = st.slider(
             "Left column width (%)", 30, 70, 50, 5, key="mtf_pct"
@@ -881,6 +971,48 @@ with st.sidebar:
         mtf_show_header = st.checkbox("Show shaded header row", value=False, key="mtf_hdr")
         mtf_inside_v    = st.checkbox("Show border between columns", value=False, key="mtf_vbdr")
         mtf_cell_pad    = st.number_input("Cell left padding (twips)", 0, 120, 40, 10, key="mtf_pad")
+
+    with st.expander("📊 Suchi Table (सूची)", expanded=False):
+        suchi_h1_override = st.text_input(
+            "Suchi left heading", value="", key="suchi_h1_ovr",
+            placeholder="blank = use the heading from the file"
+        ).strip()
+        suchi_h2_override = st.text_input(
+            "Suchi right heading", value="", key="suchi_h2_ovr",
+            placeholder="blank = use the heading from the file"
+        ).strip()
+        st.caption("Whatever you type here replaces the heading of **every** `<suchi>` table "
+                   "(DOCX, preview and PDF). Leave blank to keep each question's own heading.")
+
+    with st.expander("🔖 Heading & Chapter Style", expanded=False):
+        hd_font    = st.slider("Heading font size (pt)", 5.0, 24.0, 13.0, 0.5, key="hd_font")
+        hd_bold    = st.checkbox("Bold heading", True, key="hd_bold")
+        ch_font    = st.slider("Chapter font size (pt)", 5.0, 28.0, 15.0, 0.5, key="ch_font")
+        ch_bold    = st.checkbox("Bold chapter", True, key="ch_bold")
+        ch_in_body = st.checkbox(
+            "Show <chapter> title at the top of the content", True, key="ch_in_body",
+            help="Untick to use the <chapter> text only for the page header / file name."
+        )
+
+    with st.expander("🗂️ Table Style (<table> tag)", expanded=False):
+        tb_font          = st.slider("Table font size (pt)", 5.0, 15.0, 11.0, 0.5, key="tb_font")
+        tb_borders       = st.checkbox("Cell borders", True, key="tb_borders")
+        tb_header        = st.checkbox("First row is a header (bold + shaded)", True, key="tb_header")
+        tb_repeat_header = st.checkbox("Repeat header row on every page", True, key="tb_rep_hdr")
+        tb_header_fill   = hex_color_input("Header row background", "tb_hdr_fill",
+                                           "Blank = light grey (D9D9D9).")
+
+    with st.expander("🌈 Text Colours (hex)", expanded=False):
+        st.caption("Type a hex value such as `#C00000` or `1F4E79`. Blank keeps the default colour.")
+        col_q       = hex_color_input("Question",             "col_q")
+        col_opt     = hex_color_input("Options",              "col_opt")
+        col_ans     = hex_color_input("Answer",               "col_ans")
+        col_expl    = hex_color_input("Explanation",          "col_expl")
+        col_kathan  = hex_color_input("Kathan",               "col_kathan")
+        col_suchi   = hex_color_input("Suchi / match tables", "col_suchi")
+        col_heading = hex_color_input("Heading",              "col_heading")
+        col_chapter = hex_color_input("Chapter",              "col_chapter")
+        col_table   = hex_color_input("Table text",           "col_table")
 
     st.header("📝 Header & Footer")
     chapter_heading = st.text_input("Chapter Heading", "")
@@ -929,9 +1061,25 @@ def _doc_to_text(doc):
 # ---------------------------------------------------------------------------
 # STEP 2 — Split document text into tag blocks
 # ---------------------------------------------------------------------------
-# Supported tags: question, kathan, suchi, option, answer, expl, statement
+# Supported tags:
+#   question, kathan, suchi, option, answer, expl      — per-question content
+#   or          — internal-choice marker ("OR") between two questions
+#   heading     — section heading between questions (centred in its column)
+#   chapter     — chapter name, normally at the very top (centred in its column)
+#   table       — a data table, always rendered full page width (one column)
+# <kathan> may also be NESTED inside <expl> to mark explanation points; those are
+# picked up by the <expl> block (they are never treated as top-level kathan).
+# <alternative> and <statement> are kept as silent legacy aliases of <or> so old
+# files keep working — delete them from _MARKER_TAGS to drop that support.
+_MARKER_TAGS = {
+    "or":          "alternative",
+    "alternative": "alternative",
+    "statement":   "alternative",
+    "heading":     "heading",
+    "chapter":     "chapter",
+}
 _TAG_RE = re.compile(
-    r'<(question|kathan|suchi|option|answer|expl|statement)>(.*?)</\1>',
+    r'<(question|kathan|suchi|option|answer|expl|table|' + "|".join(_MARKER_TAGS) + r')>(.*?)</\1>',
     re.DOTALL | re.IGNORECASE
 )
 
@@ -953,26 +1101,11 @@ def _group_blocks_into_questions(blocks):
     """
     A new question starts whenever we see a <question> or <kathan> tag
     that contains a question number.
-
-    <statement>OR</statement> starts a new "OR-linked" sub-part inside the
-    CURRENT question — used for the RBD "same-topic, multiple exam papers"
-    format where several question/option/answer triples share one final
-    explanation:
-
-        <question>46. ...</question><option>...</option><answer>(d)</answer>
-        <statement>OR</statement>
-        <question>Under which district ...</question><option>...</option><answer>(b)</answer>
-        <statement>OR</statement>
-        <question>Where are 'Kolvi caves' ...</question><option>...</option><answer>(b)</answer>
-        <expl>...</expl>
-
     Returns list of raw question dicts:
-      {no, question_raw, kathan_raw, suchi_raw, option_raw, answer_raw, expl_raw,
-       or_parts: [ {question_raw, option_raw, answer_raw}, ... ]}
+      {no, question_raw, kathan_raw, suchi_raw, option_raw, answer_raw, expl_raw}
     """
     questions = []
-    current      = None
-    active_part  = None   # None => filling `current` directly; int => index into current["or_parts"]
+    current   = None
 
     def _new_q():
         return {
@@ -983,44 +1116,66 @@ def _group_blocks_into_questions(blocks):
             "option_raw":   "",
             "answer_raw":   "",
             "expl_raw":     "",
-            "or_parts":     [],
+            "tables_pre":   [],   # <table> found inside the question, before its options
+            "tables_post":  [],   # <table> found inside the question, after its options
         }
 
-    def _new_part():
-        return {"question_raw": "", "option_raw": "", "answer_raw": ""}
-
     for tag, content in blocks:
+        if tag in _MARKER_TAGS:
+            # Standalone layout marker: <or> (internal choice, e.g. "OR"),
+            # <heading> or <chapter>. Close out whatever question came before it,
+            # then emit a standalone item — it must NOT be folded into either
+            # question's fields, and it never consumes a question number.
+            kind = _MARKER_TAGS[tag]
+            if current:
+                questions.append(current)
+                current = None
+            text = re.sub(r'\s+', ' ', content or "").strip()
+            if kind == "alternative" and not text:
+                text = "OR"
+            if text:
+                questions.append({"__marker__": kind, "text": text})
+            continue
+
+        if tag == "table":
+            rows = parse_table_rows(content)
+            if not rows:
+                continue
+            # A table that appears while a question is still "open" (no <answer>/<expl>
+            # yet) belongs to that question and keeps its position inside it.
+            # Otherwise it is a standalone table between questions.
+            if current is not None and not current["answer_raw"] and not current["expl_raw"]:
+                current["tables_post" if current["option_raw"] else "tables_pre"].append(rows)
+            else:
+                if current:
+                    questions.append(current)
+                    current = None
+                questions.append({"__marker__": "table", "rows": rows})
+            continue
+
         if tag == "question":
             # Extract question number from content
             m = re.match(r'^\s*(?:प्रश्न\s*)?(\d+)[.):\s]', content)
             if not m:
                 m = re.match(r'^\s*(?:Q|q)\.?\s*(\d+)[.):\s]?', content)
             if m:
-                # A numbered <question> ALWAYS starts a brand-new top-level question.
                 if current:
                     questions.append(current)
-                current      = _new_q()
-                active_part  = None
+                current = _new_q()
                 current["no"]           = m.group(1)
                 current["question_raw"] = content
+            elif current is None:
+                # No leading number, and there's no open question to attach to —
+                # this is a fresh question (typically the 2nd/3rd alternative
+                # after an <or> marker, which commonly has no explicit number
+                # in the source). Start a new question instead of dropping the
+                # text; it will get an auto-number later via apply_numbering_mode().
+                current = _new_q()
+                current["question_raw"] = content
             else:
-                if current is None:
-                    current = _new_q()
-                if active_part is not None:
-                    part = current["or_parts"][active_part]
-                    part["question_raw"] += ("\n" if part["question_raw"] else "") + content
-                else:
-                    # No number, not inside an OR-part — treat as continuation
-                    # of the current question body (legacy behaviour).
-                    current["question_raw"] += ("\n" if current["question_raw"] else "") + content
-
-        elif tag == "statement":
-            if content.strip().upper() == "OR":
-                if current is None:
-                    current = _new_q()
-                current["or_parts"].append(_new_part())
-                active_part = len(current["or_parts"]) - 1
-            # any other <statement> content is ignored for now
+                # No number — this is a continuation line of the question
+                # that's still open, so append it to that question's body.
+                current["question_raw"] += "\n" + content
 
         elif tag == "kathan":
             if current is None:
@@ -1035,23 +1190,14 @@ def _group_blocks_into_questions(blocks):
         elif tag == "option":
             if current is None:
                 current = _new_q()
-            if active_part is not None:
-                part = current["or_parts"][active_part]
-                part["option_raw"] += ("\n" if part["option_raw"] else "") + content
-            else:
-                current["option_raw"] += ("\n" if current["option_raw"] else "") + content
+            current["option_raw"] += ("\n" if current["option_raw"] else "") + content
 
         elif tag == "answer":
             if current is None:
                 current = _new_q()
-            if active_part is not None:
-                current["or_parts"][active_part]["answer_raw"] = content
-            else:
-                current["answer_raw"] = content
+            current["answer_raw"] = content
 
         elif tag == "expl":
-            # Explanation is always shared at the question level, even when
-            # it arrives while we're "inside" an OR-part.
             if current is None:
                 current = _new_q()
             current["expl_raw"] += ("\n" if current["expl_raw"] else "") + content
@@ -1098,9 +1244,9 @@ def _detect_suchi_header(text):
 
     # Pattern 1: सूची-I (sub1)  सूची-II (sub2)   — hyphen style
     m = re.search(
-        r'(सूची[-\s–]I(?:\s*\([^)]*\))?)'
+        r'(सूची[-\s–]I(?:[ \t]*\([^)]*\))?)'
         r'\s+'
-        r'(सूची[-\s–]II(?:\s*\([^)]*\))?)',
+        r'(सूची[-\s–]II(?:[ \t]*\([^)]*\))?)',
         text, re.UNICODE
     )
     if m:
@@ -1111,9 +1257,9 @@ def _detect_suchi_header(text):
 
     # Pattern 2: सूची – A  सूची – B   — en-dash style
     m = re.search(
-        r'(सूची\s*–\s*[AB](?:\s*\([^)]*\))?)'
+        r'(सूची\s*–\s*[AB](?:[ \t]*\([^)]*\))?)'
         r'\s+'
-        r'(सूची\s*–\s*[AB](?:\s*\([^)]*\))?)',
+        r'(सूची\s*–\s*[AB](?:[ \t]*\([^)]*\))?)',
         text, re.UNICODE
     )
     if m:
@@ -1124,9 +1270,9 @@ def _detect_suchi_header(text):
 
     # Pattern 3: List-I  List-II  (English)
     m = re.search(
-        r'(List[-\s]I(?:\s*\([^)]*\))?)'
+        r'(List[-\s]I(?:[ \t]*\([^)]*\))?)'
         r'\s+'
-        r'(List[-\s]II(?:\s*\([^)]*\))?)',
+        r'(List[-\s]II(?:[ \t]*\([^)]*\))?)',
         text, re.IGNORECASE
     )
     if m:
@@ -1255,19 +1401,51 @@ def parse_kathan_lines(kathan_raw):
 # Also handles  कूट:  prefix line
 # ---------------------------------------------------------------------------
 
-_OPT_RE = re.compile(r'\(([a-dA-D])\)\s*(.*?)(?=\([a-dA-D]\)|$)', re.DOTALL)
-_OPT_LINE_RE = re.compile(r'^\s*\(([a-dA-D])\)\s*(.+)$')
+_OPT_RE = re.compile(r'\(([a-eA-E])\)\s*(.*?)(?=\([a-eA-E]\)|$)', re.DOTALL)
+_OPT_LINE_RE = re.compile(r'^\s*\(([a-eA-E])\)\s*(.+)$')
+
+def _parse_options_one_line(text):
+    """
+    "All options on one line" mode:  (a) x (b) y (c) z (d) w   [(e) v]
+    Line breaks are ignored and the text is split at the markers (a)…(e) taken IN
+    ORDER, so a stray "(b)" inside an option's own text is not treated as a new option.
+    """
+    flat = re.sub(r'\s+', ' ', text).strip()
+    spans, expected = [], 'a'
+    for m in re.finditer(r'\(([a-eA-E])\)', flat):
+        if m.group(1).lower() == expected:
+            spans.append(m)
+            expected = chr(ord(expected) + 1)
+            if expected > 'e':
+                break
+    options = []
+    for i, m in enumerate(spans):
+        end = spans[i + 1].start() if i + 1 < len(spans) else len(flat)
+        opt_text = flat[m.end():end].strip()
+        if opt_text:
+            options.append({"key": f"({m.group(1).lower()})", "text": opt_text})
+    return options
+
 
 def parse_options_tagged(option_raw):
     """
     Returns list of {key, text} dicts.
-    Handles options on one line OR one-per-line (with or without कूट: header).
+    Default ("as written"): handles one-per-line (with or without कूट: header); if no
+    line starts with a marker it falls back to inline splitting.
+    With the sidebar option "All options on one line" ticked, the block is split inline
+    at (a)(b)(c)(d)(e) instead — see _parse_options_one_line().
     """
     if not option_raw:
         return []
 
     # Remove कूट: header line if present
     text = re.sub(r'^\s*(?:कूट|Codes?)\s*[:–-]?\s*\n?', '', option_raw, flags=re.IGNORECASE).strip()
+
+    if globals().get('opts_written_one_line', False):
+        one_line = _parse_options_one_line(text)
+        if one_line:
+            return one_line[:5]
+        # no (a)(b)… markers found → fall through to the normal parser
 
     options = []
 
@@ -1287,7 +1465,49 @@ def parse_options_tagged(option_raw):
             if opt_text:
                 options.append({"key": f"({m.group(1).lower()})", "text": opt_text})
 
-    return options[:4]
+    # 5th option (e) is optional — present only when the source tags it.
+    return options[:5]
+
+
+# ---------------------------------------------------------------------------
+# <table> parsing
+#   One row per line. Cells are separated by  |  (or │), else TAB, else 2+ spaces.
+#   Leading/trailing pipes and markdown separator rows (---|---) are ignored.
+#   Empty cells are kept so columns never shift. Short rows are padded.
+#   Rendering (first row = header?) is decided by the "Table Style" sidebar section.
+# ---------------------------------------------------------------------------
+_TABLE_SEP_ROW_RE = re.compile(r'^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?$')
+
+
+def _split_table_line(line):
+    if '|' in line or '│' in line:
+        s = line.replace('│', '|').strip()
+        if s.startswith('|'):
+            s = s[1:]
+        if s.endswith('|'):
+            s = s[:-1]
+        return [c.strip() for c in s.split('|')]
+    if '\t' in line:
+        return [c.strip() for c in line.split('\t')]
+    if re.search(r'\s{2,}', line):
+        return [c.strip() for c in re.split(r'\s{2,}', line.strip())]
+    return [line.strip()]
+
+
+def parse_table_rows(raw):
+    """Returns list of rows (each a list of cell strings, all the same length)."""
+    rows = []
+    for line in (raw or "").replace('\r', '\n').split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        if _TABLE_SEP_ROW_RE.match(line.replace('│', '|')):
+            continue
+        rows.append(_split_table_line(line))
+    if not rows:
+        return []
+    n = max(len(r) for r in rows)
+    return [r + [""] * (n - len(r)) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -1295,10 +1515,10 @@ def parse_options_tagged(option_raw):
 # ---------------------------------------------------------------------------
 
 def parse_answer_tagged(answer_raw):
-    """Returns correct answer string like '(b)' or empty string."""
+    """Returns correct answer string like '(b)' or empty string. Supports (a)-(e)."""
     if not answer_raw:
         return ""
-    m = re.search(r'\(([a-dA-D])\)', answer_raw)
+    m = re.search(r'\(([a-eA-E])\)', answer_raw)
     return f"({m.group(1).lower()})" if m else ""
 
 
@@ -1309,6 +1529,40 @@ def parse_expl_tagged(expl_raw):
     # Strip व्याख्या: / Explanation: prefix
     text = re.sub(r'^\s*(?:व्याख्या|Explanation)\s*[:–-]\s*', '', expl_raw, flags=re.IGNORECASE)
     return clean_text(text)
+
+
+_EXPL_POINT_SPLIT_RE = re.compile(r'(<kathan>.*?</kathan>)', re.DOTALL | re.IGNORECASE)
+_EXPL_POINT_INNER_RE = re.compile(r'^<kathan>(.*?)</kathan>$', re.DOTALL | re.IGNORECASE)
+
+
+def parse_expl_with_points(expl_raw):
+    """
+    Splits an <expl> block that may contain nested <kathan>…</kathan> points.
+    Returns (intro_text, points):
+      intro_text — everything before the first <kathan> (label stripped, cleaned)
+      points     — list of strings, in document order. Text sitting between or after
+                   points is kept as its own entry so nothing is lost.
+    Points are NOT passed through clean_text(): that would strip their own
+    "1." / "2." numbering. Only whitespace is collapsed.
+    With no nested <kathan>, this behaves exactly like parse_expl_tagged().
+    """
+    if not expl_raw:
+        return "", []
+    intro_raw, points, seen_point = "", [], False
+    for part in _EXPL_POINT_SPLIT_RE.split(expl_raw):
+        m = _EXPL_POINT_INNER_RE.match(part.strip())
+        if m:
+            seen_point = True
+            t = re.sub(r'\s+', ' ', m.group(1)).strip()
+            if t:
+                points.append(t)
+        elif not seen_point:
+            intro_raw += part
+        else:
+            t = re.sub(r'\s+', ' ', part).strip()
+            if t:
+                points.append(t)
+    return parse_expl_tagged(intro_raw), points
 
 
 # ---------------------------------------------------------------------------
@@ -1364,22 +1618,8 @@ def _make_question_dict(raw_q):
     # Answer
     correct = parse_answer_tagged(raw_q["answer_raw"])
 
-    # Explanation
-    explanation = parse_expl_tagged(raw_q["expl_raw"])
-
-    # OR-linked sub-parts (same question asked in different exam papers,
-    # each with its own text + options + answer, sharing the explanation above)
-    or_parts = []
-    for part_raw in raw_q.get("or_parts", []):
-        _p_no, p_body = parse_question_text(part_raw.get("question_raw", ""))
-        if not p_body:
-            p_body = part_raw.get("question_raw", "").strip()
-        or_parts.append({
-            "question": p_body,
-            "options":  parse_options_tagged(part_raw.get("option_raw", "")),
-            "correct":  parse_answer_tagged(part_raw.get("answer_raw", "")),
-            "_layout":  None,
-        })
+    # Explanation (+ optional nested <kathan> points)
+    explanation, expl_points = parse_expl_with_points(raw_q["expl_raw"])
 
     # Build final question body:
     # If there were kathan lines, keep question body separate; kathan goes in kathan_lines field.
@@ -1397,9 +1637,11 @@ def _make_question_dict(raw_q):
         "koot_grid":            {"is_grid": False},
         "options":              options,
         "correct":              correct,
-        "or_parts":             or_parts,        # NEW: OR-linked alternate question/options/answer
         "explanation":          explanation,
+        "explanation_points":   expl_points,    # NEW: points from <kathan> nested in <expl>
         "explanation_images":   [],
+        "tables_pre":           raw_q.get("tables_pre", []),    # NEW: <table> inside question
+        "tables_post":          raw_q.get("tables_post", []),
         "metadata":             "",
         "_layout":              None,
     }
@@ -1412,6 +1654,37 @@ def _make_question_dict(raw_q):
 def _has_tags(text):
     """Return True if the document uses the tagged format."""
     return bool(_TAG_RE.search(text))
+
+
+def _blank_question_fields():
+    return {
+        "no": "", "orig_no": "", "question": "",
+        "kathan_lines": [], "suchi_rows": [],
+        "suchi_col_headers": ("सूची-I", "सूची-II"),
+        "match_following_rows": [], "koot_grid": {"is_grid": False},
+        "options": [], "correct": "", "explanation": "", "explanation_points": [],
+        "explanation_images": [], "metadata": "", "_layout": None,
+    }
+
+
+def _make_marker_question(kind, text="", rows=None):
+    """
+    Standalone layout marker — kind is one of: alternative | heading | chapter | table.
+    Shares the same dict shape as a real question so every downstream renderer
+    (fill_cell, PDF, HTML preview, numbering) can handle it via a single
+    is_marker() check, the same way is_separator markers already work.
+    """
+    m = _blank_question_fields()
+    m["text"] = text
+    m["is_" + kind] = True
+    if kind == "table":
+        m["table_rows"] = rows or []
+    return m
+
+
+def _make_alternative_marker(text):
+    """The 'OR' between two questions (from <or>, or legacy <alternative>/<statement>)."""
+    return _make_marker_question("alternative", text or "OR")
 
 
 def parse_questions_tagged(doc_or_text, is_text=False):
@@ -1432,12 +1705,19 @@ def parse_questions_tagged(doc_or_text, is_text=False):
     if not blocks:
         return []
 
-    raw_qs    = _group_blocks_into_questions(blocks)
+    raw_items = _group_blocks_into_questions(blocks)
     questions = []
-    for idx, raw_q in enumerate(raw_qs):
-        q = _make_question_dict(raw_q)
+    q_count   = 0
+    for raw_item in raw_items:
+        kind = raw_item.get("__marker__")
+        if kind:
+            # Marker items never consume a question number.
+            questions.append(_make_marker_question(kind, raw_item.get("text", ""), raw_item.get("rows")))
+            continue
+        q = _make_question_dict(raw_item)
+        q_count += 1
         if not q.get("no"):
-            q["no"] = str(idx + 1)
+            q["no"] = str(q_count)
         q["orig_no"] = q["no"]
         questions.append(q)
 
@@ -1922,9 +2202,26 @@ def _estimate_option_width_in(opt_text, font_pt):
     return (pts / 72.0) * 1.15
 
 
-def layout_options(opts, max_per_line=2, char_limit=68):
+def layout_options(opts, max_per_line=2, char_limit=68, force_single_per_line=None):
     if not opts:
         return []
+
+    if force_single_per_line is None:
+        force_single_per_line = globals().get('force_single_opt_per_line', False)
+
+    # A 5th option (E) is never packed alongside anything else — it always
+    # renders on its own final row, directly below (D). The inline correct
+    # -answer cell (normally aligned with the last option's row) then
+    # naturally lands next to E instead of D, since E's row is last.
+    has_fifth = len(opts) >= 5
+    main_opts = opts[:4] if has_fifth else opts
+    fifth_opt = opts[4] if has_fifth else None
+
+    if force_single_per_line:
+        rows = [[o] for o in main_opts]
+        if fifth_opt is not None:
+            rows.append([fifth_opt])
+        return rows
 
     content_w      = page_width - left_margin - right_margin
     col_gap        = 0.08 if num_columns == 3 else 0.12
@@ -1939,16 +2236,23 @@ def layout_options(opts, max_per_line=2, char_limit=68):
             f"{opt['key']} {opt['text']}", opt_font
         ) <= slot
 
+    opts = main_opts
     n = len(opts)
 
     if n == 4:
         short_opts = all(len(o['text'].strip()) <= 18 for o in opts)
         if short_opts:
-            return [[opts[0], opts[1]], [opts[2], opts[3]]]
+            result = [[opts[0], opts[1]], [opts[2], opts[3]]]
+            if fifth_opt is not None:
+                result.append([fifth_opt])
+            return result
 
     capped = min(n, max_per_line)
     if capped >= 2 and all(fits(o, capped) for o in opts):
-        return [list(opts[i:i + capped]) for i in range(0, n, capped)]
+        result = [list(opts[i:i + capped]) for i in range(0, n, capped)]
+        if fifth_opt is not None:
+            result.append([fifth_opt])
+        return result
 
     result = []
     i = 0
@@ -1987,6 +2291,9 @@ def layout_options(opts, max_per_line=2, char_limit=68):
         else:
             out.append(row)
             j += 1
+
+    if fifth_opt is not None:
+        out.append([fifth_opt])
 
     return out
 
@@ -2055,15 +2362,50 @@ def apply_font_to_run(run):
     rFonts.set(qn('w:cs'),       FONT_DOCX)
 
 
-def add_run(para, text, bold=False, size_pt=8, italic=False):
+def add_run(para, text, bold=False, size_pt=8, italic=False, color=None):
     r = para.add_run(text)
     r.bold      = bold
     r.italic    = italic
     r.font.size = Pt(size_pt)
+    if color:
+        r.font.color.rgb = RGBColor.from_string(color)
     apply_font_to_run(r)
     if char_spacing > 0:
         set_char_spacing(r, char_spacing)
     return r
+
+
+def _insert_color(rPr, hex_val):
+    """Put <w:color> into a hand-built <w:rPr> in schema order (before <w:sz>)."""
+    if not hex_val:
+        return
+    for old in rPr.findall(qn('w:color')):
+        rPr.remove(old)
+    c = OxmlElement('w:color')
+    c.set(qn('w:val'), hex_val)
+    sz = rPr.find(qn('w:sz'))
+    if sz is not None:
+        sz.addprevious(c)
+    else:
+        rPr.append(c)
+
+
+def _color_table_runs(tbl, hex_val):
+    """Apply one text colour to every run inside a hand-built <w:tbl>."""
+    if not hex_val:
+        return
+    for rPr in tbl.iter(qn('w:rPr')):
+        _insert_color(rPr, hex_val)
+
+
+def _add_centered_title(container, text, size_pt, bold, color):
+    """<heading> / <chapter>: a centred line inside the current column, in normal flow."""
+    p = container.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.keep_with_next = True      # never strand a heading at a column bottom
+    add_run(p, text, bold=bold, size_pt=size_pt, color=color)
+    set_spacing(p, line_pts=max(line_spacing, size_pt * 1.25), before_pts=3, after_pts=3)
+    return p
 
 
 # =============================================================================
@@ -2082,13 +2424,24 @@ def add_kathan_block(container, kathan_lines):
         p.paragraph_format.left_indent = Inches(level2_indent + kathan_indent_extra)
         if kathan_bg:
             set_paragraph_background(p, "F5F5F5")
-        add_run(p, line, bold=kathan_bold, size_pt=kathan_font)
+        add_run(p, line, bold=kathan_bold, size_pt=kathan_font, color=col_kathan)
         set_spacing(p, line_pts=line_spacing, after_pts=0)
 
 
 # =============================================================================
 # सूची TABLE  (unchanged)
 # =============================================================================
+def resolve_suchi_headers(q):
+    """Suchi headings for one question: the sidebar override (if typed) wins over the
+    heading parsed from the file. Used by the DOCX, HTML preview and PDF renderers."""
+    h1, h2 = q.get('suchi_col_headers', ("सूची-I", "सूची-II"))
+    if suchi_h1_override:
+        h1 = suchi_h1_override
+    if suchi_h2_override:
+        h2 = suchi_h2_override
+    return h1, h2
+
+
 def add_suchi_table(container, suchi_rows, col_width_in, col_headers=("सूची-I", "सूची-II")):
     if not suchi_rows:
         return
@@ -2257,6 +2610,7 @@ def add_suchi_table(container, suchi_rows, col_width_in, col_headers=("सूच
         tr.append(make_tc(right_text, half_dxa))
         tbl.append(tr)
 
+    _color_table_runs(tbl, col_suchi)
     last_para = container.paragraphs[-1]._element if container.paragraphs else None
     if last_para is not None:
         last_para.addnext(tbl)
@@ -2404,6 +2758,7 @@ def add_match_following_table(container, rows, col_width_in):
         tbl.append(make_row(mtf_h1, mtf_h2, shaded=True))
     for left_text, right_text in rows:
         tbl.append(make_row(left_text, right_text))
+    _color_table_runs(tbl, col_suchi)
 
     last_para = container.paragraphs[-1]._element if container.paragraphs else None
     if last_para is not None:
@@ -2547,6 +2902,8 @@ def add_koot_grid_table(container, koot_grid, col_width_in, correct_ans):
             cells.append(make_cell(v, val_dxa, bold=is_correct))
         tbl.append(make_row(cells))
 
+    _color_table_runs(tbl, col_opt)
+
     last_para = container.paragraphs[-1]._element if container.paragraphs else None
     if last_para is not None:
         last_para.addnext(tbl)
@@ -2576,12 +2933,14 @@ def add_options_table(container, option_groups, col_width_in, correct_ans, ancho
             is_last = (idx == len(all_opts) - 1)
             p = container.add_paragraph()
             p.paragraph_format.left_indent = Inches(level2_indent + 0.1)
-            add_run(p, f"{opt['key']} {opt['text']}", bold=opt_bold, size_pt=opt_font)
+            add_run(p, f"{opt['key']} {opt['text']}", bold=opt_bold, size_pt=opt_font, color=col_opt)
             set_spacing(p, line_pts=line_spacing, after_pts=0)
             if is_last and show_correct_inline and correct_ans:
                 r_ans = p.add_run(f"  {correct_ans}")
                 r_ans.bold      = True
                 r_ans.font.size = Pt(opt_font)
+                if col_ans:
+                    r_ans.font.color.rgb = RGBColor.from_string(col_ans)
                 apply_font_to_run(r_ans)
                 p.alignment = WD_ALIGN_PARAGRAPH.LEFT
         return
@@ -2593,7 +2952,7 @@ def add_options_table(container, option_groups, col_width_in, correct_ans, ancho
     ind_dxa      = int(level2_indent * 1440)
     total_rows   = len(option_groups)
 
-    def make_opt_tc(text, width_dxa, bold=False, align='left'):
+    def make_opt_tc(text, width_dxa, bold=False, align='left', color=None):
         tc   = OxmlElement('w:tc')
         tcPr = OxmlElement('w:tcPr')
         tcW  = OxmlElement('w:tcW')
@@ -2638,6 +2997,7 @@ def add_options_table(container, option_groups, col_width_in, correct_ans, ancho
         rF.set(qn('w:hAnsi'),   FONT_DOCX)
         rF.set(qn('w:cs'),      FONT_DOCX)
         rPr.insert(0, rF)
+        _insert_color(rPr, color)
         r.append(rPr)
         t = OxmlElement('w:t')
         t.set(qn('xml:space'), 'preserve')
@@ -2707,11 +3067,11 @@ def add_options_table(container, option_groups, col_width_in, correct_ans, ancho
         tr.append(trPr)
 
         for opt in group:
-            tr.append(make_opt_tc(f"{opt['key']} {opt['text']}", col_w_dxa))
+            tr.append(make_opt_tc(f"{opt['key']} {opt['text']}", col_w_dxa, color=col_opt))
 
         if include_ans:
             if is_last_group and show_correct_inline and correct_ans:
-                tr.append(make_opt_tc(correct_ans, ans_col_dxa, bold=True, align='right'))
+                tr.append(make_opt_tc(correct_ans, ans_col_dxa, bold=True, align='right', color=col_ans))
             else:
                 tr.append(make_opt_tc("", ans_col_dxa))
 
@@ -2730,6 +3090,237 @@ def add_options_table(container, option_groups, col_width_in, correct_ans, ancho
             container._element.body.append(tbl)
             current_anchor = tbl
 
+# =============================================================================
+# <table> TAG — full-width table (always one column, wherever it is placed)
+#
+# The page is a multi-column section. Word can only span columns by putting the
+# table in its OWN single-column section, so each table is wrapped like this:
+#
+#   [ N-column content ] ¶(section break) [ 1-column table ] ¶(section break) [ N-column … ]
+#
+# Every break is "continuous", so the table sits on the same page as the content
+# around it, and a table longer than a page simply flows onto the next page.
+# NOTE (Word/LibreOffice behaviour): the columns of the section that ends at a
+# continuous break are balanced, so content directly above a table is split evenly
+# between the columns instead of filling the left column first.
+# =============================================================================
+_SEC_STATE = {}   # id(document) -> {"breaks": n}   (reset for every generated document)
+
+
+def _append_body(body, element):
+    """Append an element to the document body, keeping the final <w:sectPr> last."""
+    sect = body.find(qn('w:sectPr'))
+    if sect is not None:
+        sect.addprevious(element)
+    else:
+        body.append(element)
+
+
+def _body_has_content_in_current_section(body):
+    kids = [c for c in body if c.tag != qn('w:sectPr')]
+    if not kids:
+        return False
+    last = kids[-1]
+    if last.tag == qn('w:p'):
+        pPr = last.find(qn('w:pPr'))
+        if pPr is not None and pPr.find(qn('w:sectPr')) is not None:
+            return False        # we're already right after a section break
+    return True
+
+
+def _make_section_break_para(master_sectPr, num_cols, keep_title_pg, continuous, height_twips=20):
+    """A tiny paragraph whose <w:sectPr> CLOSES a section with the given column count."""
+    sp = copy.deepcopy(master_sectPr)
+    for t in sp.findall(qn('w:type')):
+        sp.remove(t)
+    if not keep_title_pg:                 # "different first page" belongs to the 1st section only
+        for t in sp.findall(qn('w:titlePg')):
+            sp.remove(t)
+    cols = sp.find(qn('w:cols'))
+    if cols is None:
+        cols = OxmlElement('w:cols')
+        sp.append(cols)
+    cols.set(qn('w:num'), str(num_cols))
+    if continuous:
+        typ = OxmlElement('w:type')
+        typ.set(qn('w:val'), 'continuous')
+        pg = sp.find(qn('w:pgSz'))
+        if pg is not None:
+            pg.addprevious(typ)
+        else:
+            sp.insert(0, typ)
+    p   = OxmlElement('w:p')
+    pPr = OxmlElement('w:pPr')
+    spc = OxmlElement('w:spacing')
+    spc.set(qn('w:before'),   '0')
+    spc.set(qn('w:after'),    '0')
+    spc.set(qn('w:line'),     str(height_twips))
+    spc.set(qn('w:lineRule'), 'exact')
+    pPr.append(spc)
+    rPr = OxmlElement('w:rPr')
+    sz  = OxmlElement('w:sz')
+    sz.set(qn('w:val'), '2')
+    rPr.append(sz)
+    pPr.append(rPr)
+    pPr.append(sp)
+    p.append(pPr)
+    return p
+
+
+def _table_col_weights(rows):
+    """Relative column widths from the longest cell in each column (clamped 4..40 chars)."""
+    n = max(len(r) for r in rows)
+    return [min(max(max((len(r[c]) if c < len(r) else 0) for r in rows), 4), 40) for c in range(n)]
+
+
+def _build_fullwidth_table_xml(rows):
+    n_cols    = max(len(r) for r in rows)
+    rows      = [list(r) + [""] * (n_cols - len(r)) for r in rows]
+    total_dxa = int((page_width - left_margin - right_margin) * 1440)
+    weights   = _table_col_weights(rows)
+    widths    = [int(total_dxa * w / sum(weights)) for w in weights]
+    widths[-1] += total_dxa - sum(widths)
+    has_header = bool(tb_header) and len(rows) > 1
+    fill       = tb_header_fill or "D9D9D9"
+    line_twips = int(max(line_spacing, tb_font * 1.25) * 20)
+
+    tbl   = OxmlElement('w:tbl')
+    tblPr = OxmlElement('w:tblPr')
+    tblW  = OxmlElement('w:tblW')
+    tblW.set(qn('w:w'),    str(total_dxa))
+    tblW.set(qn('w:type'), 'dxa')
+    tblPr.append(tblW)
+    tblBorders = OxmlElement('w:tblBorders')
+    for edge in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+        b = OxmlElement(f'w:{edge}')
+        b.set(qn('w:val'),   'single' if tb_borders else 'nil')
+        if tb_borders:
+            b.set(qn('w:sz'),    '4')
+            b.set(qn('w:space'), '0')
+            b.set(qn('w:color'), '000000')
+        tblBorders.append(b)
+    tblPr.append(tblBorders)
+    tblLayout = OxmlElement('w:tblLayout')
+    tblLayout.set(qn('w:type'), 'fixed')
+    tblPr.append(tblLayout)
+    tblCellMar = OxmlElement('w:tblCellMar')
+    for side, val in [('top', '20'), ('left', '60'), ('bottom', '20'), ('right', '60')]:
+        m = OxmlElement(f'w:{side}')
+        m.set(qn('w:w'),    val)
+        m.set(qn('w:type'), 'dxa')
+        tblCellMar.append(m)
+    tblPr.append(tblCellMar)
+    tbl.append(tblPr)
+
+    tblGrid = OxmlElement('w:tblGrid')
+    for wdxa in widths:
+        gc = OxmlElement('w:gridCol')
+        gc.set(qn('w:w'), str(wdxa))
+        tblGrid.append(gc)
+    tbl.append(tblGrid)
+
+    for ri, row in enumerate(rows):
+        is_hdr = has_header and ri == 0
+        tr   = OxmlElement('w:tr')
+        trPr = OxmlElement('w:trPr')
+        trPr.append(OxmlElement('w:cantSplit'))
+        trH  = OxmlElement('w:trHeight')
+        trH.set(qn('w:val'),   str(line_twips))
+        trH.set(qn('w:hRule'), 'atLeast')
+        trPr.append(trH)
+        if is_hdr and tb_repeat_header:
+            trPr.append(OxmlElement('w:tblHeader'))
+        tr.append(trPr)
+        for ci, cell_text in enumerate(row):
+            tc   = OxmlElement('w:tc')
+            tcPr = OxmlElement('w:tcPr')
+            tcW  = OxmlElement('w:tcW')
+            tcW.set(qn('w:w'),    str(widths[ci]))
+            tcW.set(qn('w:type'), 'dxa')
+            tcPr.append(tcW)
+            if is_hdr:
+                shd = OxmlElement('w:shd')
+                shd.set(qn('w:val'),   'clear')
+                shd.set(qn('w:color'), 'auto')
+                shd.set(qn('w:fill'),  fill)
+                tcPr.append(shd)
+            tc.append(tcPr)
+            p   = OxmlElement('w:p')
+            pPr = OxmlElement('w:pPr')
+            sp  = OxmlElement('w:spacing')
+            sp.set(qn('w:line'),     str(line_twips))
+            sp.set(qn('w:lineRule'), 'atLeast')
+            sp.set(qn('w:before'),   '0')
+            sp.set(qn('w:after'),    '0')
+            pPr.append(sp)
+            p.append(pPr)
+            r   = OxmlElement('w:r')
+            rPr = OxmlElement('w:rPr')
+            rF  = OxmlElement('w:rFonts')
+            rF.set(qn('w:ascii'), FONT_DOCX)
+            rF.set(qn('w:hAnsi'), FONT_DOCX)
+            rF.set(qn('w:cs'),    FONT_DOCX)
+            rPr.append(rF)
+            if is_hdr:
+                rPr.append(OxmlElement('w:b'))
+            _insert_color(rPr, col_table)
+            sz = OxmlElement('w:sz')
+            sz.set(qn('w:val'), str(int(tb_font * 2)))
+            rPr.append(sz)
+            r.append(rPr)
+            t = OxmlElement('w:t')
+            t.set(qn('xml:space'), 'preserve')
+            t.text = cell_text
+            r.append(t)
+            p.append(r)
+            tc.append(p)
+            tr.append(tc)
+        tbl.append(tr)
+    return tbl
+
+
+def add_fullwidth_table(container, rows):
+    """Insert a table spanning ALL columns (its own single-column section)."""
+    if not rows:
+        return
+    body   = container.element.body
+    master = body.find(qn('w:sectPr'))
+    state  = _SEC_STATE.setdefault(id(container), {"breaks": 0})
+    n      = state["breaks"]
+    if _body_has_content_in_current_section(body):
+        _append_body(body, _make_section_break_para(master, num_columns,
+                                                    keep_title_pg=(n == 0), continuous=(n > 0)))
+        n += 1
+    _append_body(body, _build_fullwidth_table_xml(rows))
+    _append_body(body, _make_section_break_para(master, 1,
+                                                keep_title_pg=(n == 0), continuous=(n > 0),
+                                                height_twips=80))      # ~4pt gap under the table
+    state["breaks"] = n + 1
+
+
+def _finalize_sections(container):
+    """Make the final (body-level) section continuous too, and never leave it empty."""
+    state = _SEC_STATE.pop(id(container), None)
+    if not state or state["breaks"] == 0:
+        return
+    body   = container.element.body
+    master = body.find(qn('w:sectPr'))
+    for t in master.findall(qn('w:titlePg')):
+        master.remove(t)
+    for t in master.findall(qn('w:type')):
+        master.remove(t)
+    typ = OxmlElement('w:type')
+    typ.set(qn('w:val'), 'continuous')
+    pg = master.find(qn('w:pgSz'))
+    if pg is not None:
+        pg.addprevious(typ)
+    else:
+        master.insert(0, typ)
+    if not _body_has_content_in_current_section(body):
+        p = container.add_paragraph()
+        set_spacing(p, line_pts=1, after_pts=0)
+
+
 # -=-------  Fill cell  
 
 def fill_cell(container, q, include_metadata=False):
@@ -2745,6 +3336,28 @@ def fill_cell(container, q, include_metadata=False):
         set_spacing(p_sep, line_pts=line_spacing, before_pts=4, after_pts=4)
         return
 
+    if q.get('is_alternative'):
+        p_alt = container.add_paragraph()
+        p_alt.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_alt.paragraph_format.left_indent = Inches(level2_indent)
+        add_run(p_alt, q.get('text', 'OR'), bold=True, size_pt=q_font, color=col_q)
+        set_spacing(p_alt, line_pts=line_spacing, before_pts=2, after_pts=2)
+        return
+
+    if q.get('is_chapter'):
+        if ch_in_body and q.get('text'):
+            _add_centered_title(container, q['text'], ch_font, ch_bold, col_chapter)
+        return
+
+    if q.get('is_heading'):
+        if q.get('text'):
+            _add_centered_title(container, q['text'], hd_font, hd_bold, col_heading)
+        return
+
+    if q.get('is_table'):
+        add_fullwidth_table(container, q.get('table_rows', []))
+        return
+
     # ── Question paragraph ──────────────────────────────────────────────────
     p_q = container.add_paragraph()
     p_q.paragraph_format.left_indent       = Inches(level2_indent)
@@ -2755,8 +3368,8 @@ def fill_cell(container, q, include_metadata=False):
     tab_stops.add_tab_stop(Inches(col_width - 0.2), WD_TAB_ALIGNMENT.LEFT)
 
     display_question = q['question']
-    add_run(p_q, f"{q['no']}. ", bold=True,   size_pt=q_font)
-    add_run(p_q, display_question, bold=q_bold, size_pt=q_font)
+    add_run(p_q, f"{q['no']}. ", bold=True,   size_pt=q_font, color=col_q)
+    add_run(p_q, display_question, bold=q_bold, size_pt=q_font, color=col_q)
     set_spacing(p_q, line_pts=line_spacing, after_pts=para_spacing)
 
     if include_metadata and q.get('metadata'):
@@ -2776,11 +3389,15 @@ def fill_cell(container, q, include_metadata=False):
     # ── Suchi table ─────────────────────────────────────────────────────────
     if q.get('suchi_rows'):
         add_suchi_table(container, q['suchi_rows'], col_width,
-                        col_headers=q.get('suchi_col_headers', ("सूची-I", "सूची-II")))
+                        col_headers=resolve_suchi_headers(q))
 
     # ── Match the following table ────────────────────────────────────────────
     if q.get('match_following_rows'):
         add_match_following_table(container, q['match_following_rows'], col_width)
+
+    # ── <table> tags found inside this question, before its options ──────────
+    for _rows in q.get('tables_pre', []):
+        add_fullwidth_table(container, _rows)
 
     # ── Fresh anchor paragraph placed AFTER all tables ───────────────────────
     # We add a real zero-height paragraph so addnext() in add_options_table
@@ -2795,39 +3412,20 @@ def fill_cell(container, q, include_metadata=False):
         anchor_el.getparent().remove(anchor_el)
         add_koot_grid_table(container, kg, col_width, q['correct'])
     else:
-        option_groups = q.get('_layout', layout_options(
+        option_groups = q.get('_layout') or layout_options(
             q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit
-        ))
+        )
         add_options_table(container, option_groups, col_width, q['correct'],
                           anchor=anchor_el)
         anchor_el.getparent().remove(anchor_el)
 
-    # ── OR-linked sub-parts (same question, other exam papers) ───────────────
-    for part in q.get('or_parts', []):
-        p_or = container.add_paragraph()
-        p_or.paragraph_format.left_indent = Inches(level2_indent)
-        p_or.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        add_run(p_or, "OR", bold=True, size_pt=q_font)
-        set_spacing(p_or, line_pts=line_spacing, before_pts=para_spacing, after_pts=para_spacing)
+    # ── <table> tags found inside this question, after its options ───────────
+    for _rows in q.get('tables_post', []):
+        add_fullwidth_table(container, _rows)
 
-        p_part = container.add_paragraph()
-        p_part.paragraph_format.left_indent = Inches(level2_indent)
-        add_run(p_part, part.get('question', ''), bold=q_bold, size_pt=q_font)
-        set_spacing(p_part, line_pts=line_spacing, after_pts=para_spacing)
-
-        p_anchor2 = container.add_paragraph()
-        set_spacing(p_anchor2, line_pts=0, after_pts=0)
-        anchor2_el = p_anchor2._element
-
-        part_layout = part.get('_layout') or layout_options(
-            part.get('options', []), max_per_line=opts_per_line, char_limit=opt_char_limit
-        )
-        add_options_table(container, part_layout, col_width, part.get('correct', ''),
-                          anchor=anchor2_el)
-        anchor2_el.getparent().remove(anchor2_el)
-
-    # ── Explanation ──────────────────────────────────────────────────────────
-    if q['explanation']:
+    # ── Explanation (optional points from <kathan> nested in <expl>) ─────────
+    expl_points = q.get('explanation_points') or []
+    if q['explanation'] or expl_points:
         p_expl = container.add_paragraph()
         p_expl.paragraph_format.left_indent       = Inches(level2_indent)
         p_expl.paragraph_format.first_line_indent = Inches(level1_indent - level2_indent)
@@ -2835,13 +3433,23 @@ def fill_cell(container, q, include_metadata=False):
             set_paragraph_background(p_expl, "E6E6E6")
         _label  = expl_prefix if expl_prefix.strip() else "व्याख्या"
         _prefix = f"➤ {_label}: " if expl_bullet else f"{_label}: "
-        add_run(p_expl, _prefix,          bold=True, size_pt=expl_font)
-        add_run(p_expl, q['explanation'],             size_pt=expl_font)
-        set_spacing(p_expl, line_pts=line_spacing, before_pts=0, after_pts=para_spacing * 2)
+        add_run(p_expl, _prefix,          bold=True, size_pt=expl_font, color=col_expl)
+        if q['explanation']:
+            add_run(p_expl, q['explanation'],         size_pt=expl_font, color=col_expl)
+        set_spacing(p_expl, line_pts=line_spacing, before_pts=0,
+                    after_pts=0 if expl_points else para_spacing * 2)
         pPr_e = p_expl._p.get_or_add_pPr()
         ctxSp = OxmlElement('w:contextualSpacing')
         ctxSp.set(qn('w:val'), '1')
         pPr_e.append(ctxSp)
+        for pi, pt_text in enumerate(expl_points):
+            p_pt = container.add_paragraph()
+            p_pt.paragraph_format.left_indent = Inches(level2_indent + kathan_indent_extra)
+            if expl_bg:
+                set_paragraph_background(p_pt, "E6E6E6")
+            add_run(p_pt, pt_text, size_pt=expl_font, color=col_expl)
+            set_spacing(p_pt, line_pts=line_spacing, before_pts=0,
+                        after_pts=para_spacing * 2 if pi == len(expl_points) - 1 else 0)
 
     # ── Explanation images ────────────────────────────────────────────────────
     for idx, (img_bytes, width_in, height_in) in enumerate(q.get('explanation_images', [])):
@@ -2874,16 +3482,21 @@ def fill_cell(container, q, include_metadata=False):
 def estimate_q_lines(q):
     if q.get('is_separator'):
         return 2
+    if q.get('is_alternative'):
+        return 1
+    if q.get('is_heading') or q.get('is_chapter'):
+        return 2
+    if q.get('is_table'):
+        return len(q.get('table_rows', [])) + 1
     lines  = 1
+    lines += sum(len(t) + 1 for t in q.get('tables_pre', []) + q.get('tables_post', []))
+    lines += len(q.get('explanation_points', []))
     lines += len(q.get('kathan_lines', []))
     lines += len(layout_options(q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit))
     if q['explanation']:
         lines += 1
     lines += len(q.get('suchi_rows', [])) + (1 if q.get('suchi_rows') else 0)
     lines += len(q.get('explanation_images', [])) * 3
-    for part in q.get('or_parts', []):
-        lines += 2  # "OR" line + sub-question line
-        lines += len(layout_options(part.get('options', []), max_per_line=opts_per_line, char_limit=opt_char_limit))
     return lines
 
 
@@ -2897,12 +3510,12 @@ def precompute_layouts(questions):
             max_per_line=opts_per_line,
             char_limit=opt_char_limit
         )
-        for part in q.get('or_parts', []):
-            part['_layout'] = layout_options(
-                part.get('options', []),
-                max_per_line=opts_per_line,
-                char_limit=opt_char_limit
-            )
+
+    # Skip the short-row re-pairing pass entirely in "one option per line"
+    # mode — that mode's whole point is that every option stays on its own
+    # line regardless of how short it is.
+    if force_single_opt_per_line:
+        return
 
     WORD_LIMIT = 3
     CHAR_LIMIT = 25
@@ -2915,21 +3528,26 @@ def precompute_layouts(questions):
         rows = q['_layout']
         if len(rows) == 1:
             continue
+        # A 5th option (E) always keeps its own final row — never let this
+        # pass merge it back into D's row, even if both are short.
+        has_fifth  = len(q.get('options', [])) >= 5
+        merge_rows = rows[:-1] if has_fifth else rows
+        locked_tail = [rows[-1]] if has_fifth else []
         out = []
         i   = 0
-        while i < len(rows):
-            row = rows[i]
+        while i < len(merge_rows):
+            row = merge_rows[i]
             if (len(row) == 1
-                    and i + 1 < len(rows)
-                    and len(rows[i + 1]) == 1
+                    and i + 1 < len(merge_rows)
+                    and len(merge_rows[i + 1]) == 1
                     and can_pair(row[0])
-                    and can_pair(rows[i + 1][0])):
-                out.append([row[0], rows[i + 1][0]])
+                    and can_pair(merge_rows[i + 1][0])):
+                out.append([row[0], merge_rows[i + 1][0]])
                 i += 2
             else:
                 out.append(row)
                 i += 1
-        q['_layout'] = out
+        q['_layout'] = out + locked_tail
 
 
 # =============================================================================
@@ -2937,6 +3555,7 @@ def precompute_layouts(questions):
 # =============================================================================
 def generate_multi_page_docx(questions, chapter_title):
     doc = Document()
+    _SEC_STATE[id(doc)] = {"breaks": 0}
 
     sec = doc.sections[0]
     sec.page_width    = Inches(page_width)
@@ -3237,18 +3856,67 @@ def generate_multi_page_docx(questions, chapter_title):
     for q in questions:
         fill_cell(doc, q, include_metadata=include_metadata)
 
+    _finalize_sections(doc)
     return doc
 
 
 # =============================================================================
 # HTML PREVIEW — updated to include kathan_lines rendering
 # =============================================================================
+def _c(hex_val):
+    """CSS colour declaration for a hex value (empty when default)."""
+    return f"color:#{hex_val};" if hex_val else ""
+
+
+def _wide(html):
+    """Mark a block as full-width (spans all columns). build_preview_with_pagination
+    splits the column flow around these, like the section breaks in the DOCX."""
+    return f"<!--W-->{html}<!--/W-->"
+
+
+def _table_preview_html(rows):
+    has_header = bool(tb_header) and len(rows) > 1
+    fill  = tb_header_fill or "D9D9D9"
+    bdr   = "border:1px solid #000;" if tb_borders else ""
+    out = (f"<table style='width:100%;border-collapse:collapse;margin:4px 0;"
+           f"font-size:{tb_font}pt;{_c(col_table)}'>")
+    for ri, row in enumerate(rows):
+        is_hdr = has_header and ri == 0
+        tag    = "th" if is_hdr else "td"
+        bg     = f"background:#{fill};" if is_hdr else ""
+        fw     = "font-weight:bold;" if is_hdr else ""
+        out += "<tr>" + "".join(
+            f"<{tag} style='padding:2px 6px;text-align:left;vertical-align:top;{bdr}{bg}{fw}'>"
+            f"{_esc(cell)}</{tag}>"
+            for cell in row
+        ) + "</tr>"
+    return out + "</table>"
+
+
 def render_q_preview(q):
     if q.get('is_separator'):
         return f"""<div class="qblock" style="break-inside:avoid;page-break-inside:avoid;">
   <div style="background:#3B3B3B;color:#fff;font-weight:bold;text-align:center;
     padding:6px;margin:8px 0;border-radius:3px;">📄 {q.get('text', '')}</div>
 </div>"""
+    if q.get('is_alternative'):
+        return f"""<div class="qblock" style="break-inside:avoid;page-break-inside:avoid;
+  text-align:center;font-weight:bold;font-size:{q_font}pt;margin:4px 0;{_c(col_q)}">
+  {q.get('text', 'OR')}
+</div>"""
+    if q.get('is_chapter'):
+        if not (ch_in_body and q.get('text')):
+            return ""
+        return (f"<div class=\"qblock\" style=\"text-align:center;font-size:{ch_font}pt;"
+                f"font-weight:{'700' if ch_bold else '400'};margin:4px 0;{_c(col_chapter)}\">"
+                f"{_esc(q['text'])}</div>")
+    if q.get('is_heading'):
+        return (f"<div class=\"qblock\" style=\"text-align:center;font-size:{hd_font}pt;"
+                f"font-weight:{'700' if hd_bold else '400'};margin:4px 0;{_c(col_heading)}\">"
+                f"{_esc(q.get('text', ''))}</div>")
+    if q.get('is_table'):
+        return _wide(_table_preview_html(q.get('table_rows', [])))
+
     l1px = level1_indent * 96
     l2px = level2_indent * 96
     kl_px = (level2_indent + kathan_indent_extra) * 96
@@ -3273,12 +3941,12 @@ def render_q_preview(q):
         for idx, opt in enumerate(all_opts):
             is_last = (idx == len(all_opts) - 1)
             ans_span = (
-                f"<span style='font-weight:900;margin-left:8px;'>{q['correct']}</span>"
+                f"<span style='font-weight:900;margin-left:8px;{_c(col_ans)}'>{q['correct']}</span>"
                 if is_last and show_correct_inline and q['correct'] else ""
             )
             opts_html += (
                 f"<div style='margin-left:{l2px + 10}px;font-size:{opt_font}pt;"
-                f"line-height:{line_spacing}pt;'>"
+                f"line-height:{line_spacing}pt;{_c(col_opt)}'>"
                 f"{opt['key']} {opt['text']}{ans_span}</div>"
             )
     else:
@@ -3286,7 +3954,7 @@ def render_q_preview(q):
             is_last = (row_idx == total_rows - 1)
             cells_html = "".join(
                 f"<div style='min-width:0;overflow-wrap:break-word;word-break:break-word;"
-                f"font-weight:{'700' if opt_bold else '400'};'>"
+                f"font-weight:{'700' if opt_bold else '400'};{_c(col_opt)}'>"
                 f"{o['key']} {o['text']}</div>"
                 for o in group
             )
@@ -3299,7 +3967,7 @@ def render_q_preview(q):
                     f"  <div style='display:grid;grid-template-columns:repeat({n_cols},1fr);"
                     f"flex:1;font-size:{opt_font}pt;column-gap:6px;"
                     f"line-height:{line_spacing}pt;'>{cells_html}</div>"
-                    f"  <span style='font-weight:900;font-size:{opt_font+1.5}pt;"
+                    f"  <span style='font-weight:900;font-size:{opt_font+1.5}pt;{_c(col_ans)}"
                     f"white-space:nowrap;margin-left:8px;flex-shrink:0;'>{q.get('correct','')}</span>"
                     f"</div>"
                 )
@@ -3317,7 +3985,7 @@ def render_q_preview(q):
         for line in q['kathan_lines']:
             safe_line = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             kathan_html += (
-                f"<div style='margin-left:{kl_px}px;{bg_style}"
+                f"<div style='margin-left:{kl_px}px;{bg_style}{_c(col_kathan)}"
                 f"font-size:{kathan_font}pt;font-weight:{'bold' if kathan_bold else 'normal'};"
                 f"line-height:{line_spacing}pt;'>{safe_line}</div>"
             )
@@ -3325,9 +3993,9 @@ def render_q_preview(q):
     # ── Suchi / match table HTML ───────────────────────────────────────────
     suchi_html = ""
     if q.get('suchi_rows'):
-        h1_lbl, h2_lbl = q.get('suchi_col_headers', ("सूची-I", "सूची-II"))
+        h1_lbl, h2_lbl = resolve_suchi_headers(q)
         suchi_html += (
-            f"<table style='margin-left:{l2px}px;border-collapse:collapse;"
+            f"<table style='margin-left:{l2px}px;border-collapse:collapse;{_c(col_suchi)}"
             f"font-size:{q_font}pt;width:calc(100% - {l2px}px);table-layout:fixed;'>"
             f"<colgroup><col style='width:50%;'><col style='width:50%;'></colgroup>"
             f"<tr><th style='background:#D9D9D9;padding:2px 6px;text-align:left;'>{h1_lbl}</th>"
@@ -3347,7 +4015,7 @@ def render_q_preview(q):
         rp  = 100 - lp
         bdr = 'border-right:1px solid #ccc;' if mtf_inside_v else ''
         suchi_html += (
-            f"<table style='margin-left:{l2px}px;border-collapse:collapse;"
+            f"<table style='margin-left:{l2px}px;border-collapse:collapse;{_c(col_suchi)}"
             f"font-size:{q_font}pt;width:calc(100% - {l2px}px);table-layout:fixed;'>"
             f"<colgroup><col style='width:{lp}%;'><col style='width:{rp}%;'></colgroup>"
         )
@@ -3374,7 +4042,7 @@ def render_q_preview(q):
         n_val       = max((len(r[1]) for r in grid_rows), default=0)
         correct_key = (q.get('correct') or "").strip("() ").upper()
         suchi_html += (
-            f"<table style='margin-left:{l2px}px;border-collapse:collapse;"
+            f"<table style='margin-left:{l2px}px;border-collapse:collapse;{_c(col_opt)}"
             f"font-size:{opt_font}pt;margin-top:2px;'>"
         )
         if col_headers:
@@ -3404,58 +4072,24 @@ def render_q_preview(q):
         suchi_html += "</table>"
         opts_html = ""
 
-    # ── OR-linked sub-parts HTML ────────────────────────────────────────────
-    or_parts_html = ""
-    for part in q.get('or_parts', []):
-        p_option_groups = layout_options(part.get('options', []), max_per_line=opts_per_line, char_limit=opt_char_limit)
-        p_all_opts = [o for g in p_option_groups for o in g]
-        p_n_cols = max(len(g) for g in p_option_groups) if p_option_groups else 1
-        p_opts_html = ""
-        for row_idx, group in enumerate(p_option_groups):
-            is_last = (row_idx == len(p_option_groups) - 1)
-            cells_html = "".join(
-                f"<div style='min-width:0;overflow-wrap:break-word;word-break:break-word;"
-                f"font-weight:{'700' if opt_bold else '400'};'>{o['key']} {o['text']}</div>"
-                for o in group
-            )
-            for _ in range(p_n_cols - len(group)):
-                cells_html += "<div></div>"
-            if show_correct_inline and is_last:
-                p_opts_html += (
-                    f"<div style='display:flex;align-items:center;margin-left:{l2px}px;'>"
-                    f"  <div style='display:grid;grid-template-columns:repeat({p_n_cols},1fr);"
-                    f"flex:1;font-size:{opt_font}pt;column-gap:6px;line-height:{line_spacing}pt;'>{cells_html}</div>"
-                    f"  <span style='font-weight:900;font-size:{opt_font+1.5}pt;"
-                    f"white-space:nowrap;margin-left:8px;flex-shrink:0;'>{part.get('correct','')}</span>"
-                    f"</div>"
-                )
-            else:
-                p_opts_html += (
-                    f"<div style='display:grid;grid-template-columns:repeat({p_n_cols},1fr);"
-                    f"margin-left:{l2px}px;font-size:{opt_font}pt;column-gap:6px;line-height:{line_spacing}pt;'>{cells_html}</div>"
-                )
-        p_question_html = part.get('question', '').replace('\n', '<br>')
-        or_parts_html += (
-            f"<div style='margin-left:{l2px}px;font-weight:bold;font-size:{q_font}pt;"
-            f"margin-top:3px;margin-bottom:2px;'>OR</div>"
-            f"<div style='margin-left:{l2px}px;font-size:{q_font}pt;"
-            f"font-weight:{'700' if q_bold else '400'};margin-bottom:2px;white-space:pre-wrap;'>"
-            f"{p_question_html}</div>"
-            f"{p_opts_html}"
-        )
-
+    expl_points = q.get('explanation_points') or []
     expl_html = ""
-    if q['explanation'] or q.get('explanation_images'):
+    if q['explanation'] or expl_points or q.get('explanation_images'):
         _label   = expl_prefix if expl_prefix.strip() else "व्याख्या"
         _prefix  = f"➤ {_label}: " if expl_bullet else f"{_label}: "
         bg_style = "background-color:#F0F0F0;padding:2px 4px;border-radius:3px;" if expl_bg else ""
         expl_html += (
-            f"<div style='margin-left:{l2px}px;{bg_style}font-size:{expl_font}pt;'>"
+            f"<div style='margin-left:{l2px}px;{bg_style}font-size:{expl_font}pt;{_c(col_expl)}'>"
             f"<span style='font-weight:bold;'>{_prefix}</span>"
         )
         if q['explanation']:
             expl_html += q['explanation'].replace('|', '<br>')
         expl_html += "</div>"
+        for pt_text in expl_points:
+            expl_html += (
+                f"<div style='margin-left:{kl_px}px;{bg_style}font-size:{expl_font}pt;{_c(col_expl)}'>"
+                f"{_esc(pt_text)}</div>"
+            )
         for img_bytes, _, __ in q.get('explanation_images', []):
             b64        = base64.b64encode(img_bytes).decode()
             expl_html += (
@@ -3465,7 +4099,7 @@ def render_q_preview(q):
 
     question_html = q['question'].replace('\n', '<br>')
     q_html = (
-        f"<div style='margin-left:{l2px}px;text-indent:{l1px - l2px}px;"
+        f"<div style='margin-left:{l2px}px;text-indent:{l1px - l2px}px;{_c(col_q)}"
         f"font-size:{q_font}pt;font-weight:{'700' if q_bold else '400'};"
         f"margin-bottom:2px;white-space:pre-wrap;'>"
         f"{q['no']}. {question_html}</div>"
@@ -3478,17 +4112,45 @@ def render_q_preview(q):
             f"{q['metadata']}</div>"
         )
 
-    return f"""
+    pre_tables  = q.get('tables_pre', [])
+    post_tables = q.get('tables_post', [])
+    hr_html     = '<hr>' if show_separator else ''
+
+    if not pre_tables and not post_tables:
+        return f"""
 <div class="qblock">
   {q_html}
   {meta_html}
   {kathan_html}
   {suchi_html}
   {opts_html}
-  {or_parts_html}
   {expl_html}
-  {('<hr>' if show_separator else '')}
+  {hr_html}
 </div>"""
+
+    # The question contains <table> tags: split it around the full-width table(s),
+    # exactly like the section breaks in the DOCX.
+    out = f'<div class="qblock">{q_html}{meta_html}{kathan_html}{suchi_html}</div>'
+    for rows in pre_tables:
+        out += _wide(_table_preview_html(rows))
+    out += f'<div class="qblock">{opts_html}</div>'
+    for rows in post_tables:
+        out += _wide(_table_preview_html(rows))
+    if expl_html or hr_html:
+        out += f'<div class="qblock">{expl_html}{hr_html}</div>'
+    return out
+
+
+def _wrap_columns(content_html):
+    """Column flow for normal content; full-width blocks (tables) break out of it."""
+    parts = re.split(r'(<!--W-->.*?<!--/W-->)', content_html, flags=re.S)
+    out = []
+    for part in parts:
+        if part.startswith('<!--W-->'):
+            out.append(part.replace('<!--W-->', '').replace('<!--/W-->', ''))
+        elif part.strip():
+            out.append(f'<div style="column-count:{num_columns};column-gap:18px;">{part}</div>')
+    return "".join(out)
 
 
 def build_preview_with_pagination(questions, q_per_page, heading_text):
@@ -3510,7 +4172,7 @@ def build_preview_with_pagination(questions, q_per_page, heading_text):
     font-weight:bold;margin-bottom:10px;">
     {chapter_heading if chapter_heading.strip() else heading_text} &nbsp;&nbsp;|&nbsp;&nbsp; {page_label} {page_num}
   </div>
-  <div style="column-count:{num_columns};column-gap:18px;">{content_html}</div>
+  {_wrap_columns(content_html)}
 </div>""")
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -3577,16 +4239,89 @@ def generate_pdf(questions, chapter_title):
                               fontName=font, leftIndent=kl,
                               backColor=colors.HexColor('#F5F5F5') if kathan_bg else None)
 
+    # hex colours from the sidebar (None = keep default black)
+    for _style, _hex in ((sQ, col_q), (sOpt, col_opt), (sAns, col_ans), (sExpl, col_expl),
+                         (sSuchi, col_suchi), (sKathan, col_kathan)):
+        if _hex:
+            _style.textColor = colors.HexColor('#' + _hex)
+
+    def _centered_style(name, size, hex_val):
+        st_ = ParagraphStyle(name, parent=styles['Normal'], fontSize=size, leading=size * 1.25,
+                             fontName=font, alignment=TA_CENTER, spaceBefore=3, spaceAfter=3)
+        if hex_val:
+            st_.textColor = colors.HexColor('#' + hex_val)
+        return st_
+
+    sHead  = _centered_style('Head',  hd_font, col_heading)
+    sChap  = _centered_style('Chap',  ch_font, col_chapter)
+    sTbl   = ParagraphStyle('Tbl', parent=styles['Normal'], fontSize=tb_font,
+                            leading=max(line_spacing, tb_font * 1.25), fontName=font,
+                            textColor=colors.HexColor('#' + col_table) if col_table else colors.black)
+    sExplPt = ParagraphStyle('EP', parent=sExpl, leftIndent=kl, firstLineIndent=0)
+
+    def _pdf_wide_table(rows):
+        """Full page-width table; header row repeats on every page."""
+        n_cols   = max(len(r) for r in rows)
+        rows     = [list(r) + [""] * (n_cols - len(r)) for r in rows]
+        total_w  = (page_width - left_margin - right_margin) * inch
+        weights  = _table_col_weights(rows)
+        widths   = [total_w * w / sum(weights) for w in weights]
+        has_hdr  = bool(tb_header) and len(rows) > 1
+        data = []
+        for ri, row in enumerate(rows):
+            data.append([Paragraph(f"<b>{_esc(c)}</b>" if (has_hdr and ri == 0) else _esc(c), sTbl)
+                         for c in row])
+        t = Table(data, colWidths=widths, repeatRows=1 if (has_hdr and tb_repeat_header) else 0)
+        cmds = [
+            ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 3),
+            ('TOPPADDING',    (0, 0), (-1, -1), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+        ]
+        if tb_borders:
+            cmds.append(('GRID', (0, 0), (-1, -1), 0.5, colors.black))
+        if has_hdr:
+            cmds.append(('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#' + (tb_header_fill or 'D9D9D9'))))
+        t.setStyle(TableStyle(cmds))
+        return t
+
     story = [Paragraph(f"{book_name} — {chapter_title}", sH)]
 
     sSep = ParagraphStyle('Sep', parent=styles['Normal'], fontSize=header_font, leading=header_font+2,
                            fontName=font, alignment=TA_CENTER,
                            backColor=colors.HexColor('#3B3B3B'), textColor=colors.white, spaceAfter=6, spaceBefore=6)
 
+    sAlt = ParagraphStyle('Alt', parent=styles['Normal'], fontSize=q_font, leading=line_spacing,
+                           fontName=font, alignment=TA_CENTER, spaceBefore=2, spaceAfter=2)
+
     for q in questions:
         if q.get('is_separator'):
             safe_name = (q.get('text', '') or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             story.append(Paragraph(f"<b>📄 {safe_name}</b>", sSep))
+            continue
+
+        if q.get('is_alternative'):
+            safe_alt = (q.get('text', 'OR') or 'OR').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            story.append(Paragraph(f"<b>{safe_alt}</b>", sAlt))
+            continue
+
+        if q.get('is_chapter'):
+            if ch_in_body and q.get('text'):
+                _t = _esc(q['text'])
+                story.append(Paragraph(f"<b>{_t}</b>" if ch_bold else _t, sChap))
+            continue
+
+        if q.get('is_heading'):
+            _t = _esc(q.get('text', ''))
+            story.append(Paragraph(f"<b>{_t}</b>" if hd_bold else _t, sHead))
+            continue
+
+        if q.get('is_table'):
+            if q.get('table_rows'):
+                story.append(Spacer(1, 2))
+                story.append(_pdf_wide_table(q['table_rows']))
+                story.append(Spacer(1, 4))
             continue
 
         story.append(Paragraph(f"<b>{q['no']}.</b> {q['question']}", sQ))
@@ -3606,7 +4341,7 @@ def generate_pdf(questions, chapter_title):
             col_gap   = 0.08 if num_columns == 3 else 0.12
             col_w     = (content_w - col_gap * (num_columns - 1)) / num_columns
             half_w    = (col_w - level2_indent) * inch / 2
-            h1_lbl, h2_lbl = q.get('suchi_col_headers', ("सूची-I", "सूची-II"))
+            h1_lbl, h2_lbl = resolve_suchi_headers(q)
             tdata = [[Paragraph(f"<b>{h1_lbl}</b>", sSuchi), Paragraph(f"<b>{h2_lbl}</b>", sSuchi)]]
             tdata += [[Paragraph(left, sSuchi), Paragraph(right, sSuchi)]
                       for left, right in q['suchi_rows']]
@@ -3650,57 +4385,57 @@ def generate_pdf(questions, chapter_title):
             mt.setStyle(TableStyle(ts_cmds))
             story.append(mt)
 
-        def _append_options_table(opt_groups, correct_answer):
-            if not opt_groups:
-                return
-            content_w  = page_width - left_margin - right_margin
-            col_gap    = 0.08 if num_columns == 3 else 0.12
-            col_w      = (content_w - col_gap * (num_columns - 1)) / num_columns
-            ans_col_w  = 0.38 * inch
-            opt_avail  = (col_w - level2_indent) * inch - ans_col_w
-
-            for row_idx, group in enumerate(opt_groups):
-                is_last    = row_idx == len(opt_groups) - 1
-                n_cols_row = len(group)
-                opt_col_w  = opt_avail / n_cols_row
-                row_data   = [Paragraph(f"{o['key']} {o['text']}", sOpt) for o in group]
-                if is_last and show_correct_inline and correct_answer:
-                    row_data.append(Paragraph(f"<b>{correct_answer}</b>", sAns))
-                else:
-                    row_data.append(Paragraph("", sOpt))
-                col_widths_pdf = [opt_col_w] * n_cols_row + [ans_col_w]
-                t = Table([row_data], colWidths=col_widths_pdf)
-                t.setStyle(TableStyle([
-                    ('VALIGN',        (0,0), (-1,-1), 'TOP'),
-                    ('LEFTPADDING',   (0,0), (-1,-1), 2),
-                    ('RIGHTPADDING',  (0,0), (-1,-1), 2),
-                    ('TOPPADDING',    (0,0), (-1,-1), 0),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 0),
-                    ('GRID',          (0,0), (-1,-1), 0, colors.white),
-                ]))
-                story.append(t)
+        for _rows in q.get('tables_pre', []):
+            story.append(Spacer(1, 2))
+            story.append(_pdf_wide_table(_rows))
+            story.append(Spacer(1, 4))
 
         kg = q.get('koot_grid', {})
         if not kg.get('is_grid'):
-            opt_groups = q.get('_layout', layout_options(
+            opt_groups = q.get('_layout') or layout_options(
                 q['options'], max_per_line=opts_per_line, char_limit=opt_char_limit
-            ))
-            _append_options_table(opt_groups, q['correct'])
+            )
+            if opt_groups:
+                content_w  = page_width - left_margin - right_margin
+                col_gap    = 0.08 if num_columns == 3 else 0.12
+                col_w      = (content_w - col_gap * (num_columns - 1)) / num_columns
+                ans_col_w  = 0.38 * inch
+                opt_avail  = (col_w - level2_indent) * inch - ans_col_w
 
-            # ── OR-linked sub-parts ──────────────────────────────────────────
-            for part in q.get('or_parts', []):
-                story.append(Paragraph("<b>OR</b>", sQ))
-                story.append(Paragraph(part.get('question', ''), sQ))
-                p_opt_groups = part.get('_layout') or layout_options(
-                    part.get('options', []), max_per_line=opts_per_line, char_limit=opt_char_limit
-                )
-                _append_options_table(p_opt_groups, part.get('correct', ''))
+                for row_idx, group in enumerate(opt_groups):
+                    is_last    = row_idx == len(opt_groups) - 1
+                    n_cols_row = len(group)
+                    opt_col_w  = opt_avail / n_cols_row
+                    row_data   = [Paragraph(f"{o['key']} {o['text']}", sOpt) for o in group]
+                    if is_last and show_correct_inline and q['correct']:
+                        row_data.append(Paragraph(f"<b>{q['correct']}</b>", sAns))
+                    else:
+                        row_data.append(Paragraph("", sOpt))
+                    col_widths_pdf = [opt_col_w] * n_cols_row + [ans_col_w]
+                    t = Table([row_data], colWidths=col_widths_pdf)
+                    t.setStyle(TableStyle([
+                        ('VALIGN',        (0,0), (-1,-1), 'TOP'),
+                        ('LEFTPADDING',   (0,0), (-1,-1), 2),
+                        ('RIGHTPADDING',  (0,0), (-1,-1), 2),
+                        ('TOPPADDING',    (0,0), (-1,-1), 0),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+                        ('GRID',          (0,0), (-1,-1), 0, colors.white),
+                    ]))
+                    story.append(t)
 
-        if q['explanation'] or q.get('explanation_images'):
+        for _rows in q.get('tables_post', []):
+            story.append(Spacer(1, 2))
+            story.append(_pdf_wide_table(_rows))
+            story.append(Spacer(1, 4))
+
+        _pts = q.get('explanation_points') or []
+        if q['explanation'] or _pts or q.get('explanation_images'):
             _label    = expl_prefix if expl_prefix.strip() else "व्याख्या"
             _heading  = (f"• {_label} : " if expl_bullet else f"{_label} : ")
             expl_text = _heading + (q['explanation'] if q['explanation'] else "")
             story.append(Paragraph(expl_text.replace('|', '<br/>'), sExpl))
+            for _pt in _pts:
+                story.append(Paragraph(_esc(_pt), sExplPt))
 
         if show_separator:
             story.append(Spacer(1, 2))
@@ -3737,17 +4472,39 @@ def apply_numbering_mode(questions, mode, start_number=1):
     mode: 'default'    -> keep the number exactly as it appears in the source file
           'sequenced'  -> renumber 1..N continuously across ALL merged papers
           'customized' -> renumber start_number..start_number+N-1 continuously
-    Separator markers (is_separator=True) are skipped — they don't consume a number.
+    Layout markers (separator / OR / heading / chapter / table) are skipped —
+    none of them consumes a number.
     """
     counter = start_number
     for q in questions:
-        if q.get('is_separator'):
+        if is_marker(q):
             continue
         if mode == 'default':
             q['no'] = q.get('orig_no', q.get('no', ''))
         else:  # 'sequenced' or 'customized'
             q['no'] = str(counter)
             counter += 1
+    return questions
+
+
+def apply_global_fifth_option(questions, text):
+    """
+    Appends a fixed option (e) — same text every time, e.g. 'All of the above'
+    — to every real question that doesn't already carry its own explicit
+    5th option from the tags. Skips separator/alternative markers.
+    Never overwrites a question that already has 5 options (an explicit
+    per-question (e) from the tags always wins over the global one).
+    """
+    text = (text or "").strip()
+    if not text:
+        return questions
+    for q in questions:
+        if is_marker(q):
+            continue
+        opts = q.get('options', [])
+        if len(opts) < 5:
+            opts.append({"key": "(e)", "text": text})
+            q['options'] = opts
     return questions
 
 
@@ -3816,6 +4573,7 @@ def _json_item_to_question(item, fallback_no):
         "options": _coerce_json_options(item.get('options')),
         "correct": item.get('correct') or item.get('answer', ''),
         "explanation": item.get('explanation', ''),
+        "explanation_points": item.get('explanation_points', []),
         "explanation_images": [],
         "metadata": item.get('metadata', ''),
         "_layout": None,
@@ -3832,6 +4590,15 @@ def _read_upload_text(file_obj):
         return raw.decode('latin-1', errors='ignore')
 
 
+def _chapter_from_questions(questions, fallback):
+    """If the file has a <chapter> tag, its text is the chapter title
+    (page header, output file name, preview heading); otherwise the old guess."""
+    for q in questions:
+        if q.get('is_chapter') and q.get('text'):
+            return q['text']
+    return fallback
+
+
 def parse_txt_file(file_obj):
     """TXT files must use the same <question>/<option>/<answer>/<expl>/<kathan>/<suchi>
     tag format as the tagged DOCX files."""
@@ -3846,7 +4613,7 @@ def parse_txt_file(file_obj):
 
     questions  = parse_questions_tagged(text, is_text=True)
     is_english = not any('\u0900' <= c <= '\u097F' for c in text)
-    title      = extract_chapter_title_from_lines(text.split('\n'))
+    title      = _chapter_from_questions(questions, extract_chapter_title_from_lines(text.split('\n')))
     return questions, is_english, title
 
 
@@ -3917,7 +4684,7 @@ def parse_uploaded_file(file_obj):
     if ext == 'docx':
         doc = Document(file_obj)
         questions, is_english = parse_questions(doc)
-        title = extract_chapter_title(doc)
+        title = _chapter_from_questions(questions, extract_chapter_title(doc))
         return questions, is_english, title
     elif ext == 'txt':
         return parse_txt_file(file_obj)
@@ -3943,6 +4710,8 @@ if uploaded_files_ordered and upload_mode == "Batch (process each file separatel
         for f in uploaded_files_ordered:
             qs, is_eng, title = parse_uploaded_file(f)
             qs = apply_numbering_mode(qs, numbering_mode, numbering_start)
+            if add_global_fifth_option:
+                qs = apply_global_fifth_option(qs, global_fifth_option_text)
             k = _file_key(f)
             custom_name  = (batch_output_names.get(k) or f.name.rsplit('.', 1)[0]).strip()
             base_out     = slugify_filename(custom_name, default=f"Output_{len(batch_results) + 1}")
@@ -4050,18 +4819,23 @@ elif uploaded_files_ordered:
             questions.extend(qs)
 
         questions = apply_numbering_mode(questions, numbering_mode, numbering_start)
+        if add_global_fifth_option:
+            questions = apply_global_fifth_option(questions, global_fifth_option_text)
 
         _is_english_doc = per_file_results[0][2] if per_file_results else False
         chapter_title    = per_file_results[0][3] if per_file_results else "RBD PUBLICATION — Chapter"
         st.session_state["_is_english_doc"] = _is_english_doc
 
     lang_tag    = "🇬🇧 English" if _is_english_doc else "🇮🇳 Hindi"
-    real_qs     = [q for q in questions if not q.get('is_separator')]
+    real_qs     = [q for q in questions if not is_marker(q)]
     has_kathan  = sum(1 for q in real_qs if q.get('kathan_lines'))
     has_suchi   = sum(1 for q in real_qs if q.get('suchi_rows'))
+    has_tables  = (sum(1 for q in questions if q.get('is_table'))
+                   + sum(len(q.get('tables_pre', [])) + len(q.get('tables_post', [])) for q in real_qs))
+    has_headings = sum(1 for q in questions if q.get('is_heading'))
     st.success(
         f"✅ {len(real_qs)} questions parsed from {len(uploaded_files_ordered)} file(s)!  ({lang_tag} paper)  "
-        f"| Suchi: {has_suchi}  | Kathan: {has_kathan}"
+        f"| Suchi: {has_suchi}  | Kathan: {has_kathan}  | Tables: {has_tables}  | Headings: {has_headings}"
     )
     if len(per_file_results) > 1:
         with st.expander("📊 Per-file breakdown"):
@@ -4099,6 +4873,20 @@ elif uploaded_files_ordered:
             if q.get('is_separator'):
                 st.markdown(f"**📄 — New paper begins: {q.get('text', '')} —**")
                 continue
+            if q.get('is_alternative'):
+                st.markdown(f"**— {q.get('text', 'OR')} —**")
+                continue
+            if q.get('is_chapter'):
+                st.markdown(f"**📖 Chapter:** {q.get('text', '')}")
+                continue
+            if q.get('is_heading'):
+                st.markdown(f"**🔖 Heading:** {q.get('text', '')}")
+                continue
+            if q.get('is_table'):
+                _tr = q.get('table_rows', [])
+                st.markdown(f"**🗂️ Table — {len(_tr)} rows × {len(_tr[0]) if _tr else 0} cols**")
+                st.dataframe(_tr, hide_index=True)
+                continue
             if shown >= 5:
                 break
             shown += 1
@@ -4106,6 +4894,13 @@ elif uploaded_files_ordered:
                 st.write("**Options:**",             q.get('options', []))
                 st.write("**Correct Answer:**",      q.get('correct', ''))
                 st.write("**Explanation:**",         (q.get('explanation') or '')[:500])
+                if q.get('explanation_points'):
+                    st.write(f"**Explanation points:** {len(q['explanation_points'])}",
+                             q['explanation_points'])
+                if q.get('tables_pre') or q.get('tables_post'):
+                    st.write("**Tables inside this question:**",
+                             {"before options": q.get('tables_pre', []),
+                              "after options": q.get('tables_post', [])})
                 st.write(f"**Kathan lines:**         {len(q.get('kathan_lines', []))}",
                          q.get('kathan_lines', []))
                 st.write(f"**Suchi rows:**           {len(q.get('suchi_rows', []))}",
@@ -4175,3 +4970,5 @@ elif uploaded_files_ordered:
                     file_name=f"{output_filename_base}.pdf", mime="application/pdf"
                 )
                 st.success("🎉 PDF preview ready!")
+
+
